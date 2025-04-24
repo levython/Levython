@@ -24,22 +24,63 @@ Levython is a C++-based scripting language designed for simplicity and ease of u
 - C++17 compiler (e.g., g++ 7.0+)
 - Standard C++ library
 
+
 ### Build
+Clone the repository and compile the single-file interpreter for your platform.
+
+#### Linux
 ```bash
 git clone https://github.com/levython/levython.git
 cd levython/src
 g++ levython.cpp -o levython -std=c++17
 ```
 
+#### macOS
+Install Xcode Command Line Tools (`xcode-select --install`) or Homebrew (`brew install gcc`).
+```bash
+git clone https://github.com/levython/levython.git
+cd levython/src
+clang++ levython.cpp -o levython -std=c++17  # or g++ if using Homebrew
+```
+
+#### Windows
+Install MinGW-w64 via MSYS2 (`pacman -S mingw-w64-x86_64-gcc`) or Visual Studio Community.
+- **MinGW-w64 (MSYS2)**:
+  ```bash
+  git clone https://github.com/levython/levython.git
+  cd levython/src
+  g++ levython.cpp -o levython.exe -std=c++17
+  ```
+- **Visual Studio (MSVC)**:
+  Open a Developer Command Prompt for VS, then:
+  ```bash
+  git clone https://github.com/levython/levython.git
+  cd levython/src
+  cl /EHsc /std:c++17 levython.cpp /Fe:levython.exe
+  ```
+
 ### Run
-- Run a script:
-  ```bash
-  ./levython examples/file_io.levy
-  ```
-- Start REPL:
-  ```bash
-  ./levython
-  ```
+Use the compiled binary or downloaded release binary to run scripts or start the REPL.
+
+- **Linux/macOS**:
+  - Run a script:
+    ```bash
+    ./levython examples/file_io.ly
+    ```
+  - Start REPL:
+    ```bash
+    ./levython
+    ```
+
+- **Windows**:
+  - Run a script:
+    ```bash
+    levython.exe examples\file_io.ly
+    ```
+  - Start REPL:
+    ```bash
+    levython.exe
+    ```
 
 ## Examples
 Explore scripts in `examples/`:
