@@ -1,0 +1,6 @@
+# Testing module import
+say("Module Import Test")
+import mymodule
+
+say("PI from module: " + str(mymodule.PI))
+say("Square of 4: " + str(mymodule.square(4)))

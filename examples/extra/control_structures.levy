@@ -1,0 +1,33 @@
+# Testing control structures
+say("Control Structures Test")
+x <- 42
+my_list <- [1, 2, 3]
+
+# If-Else
+if x > 40 {
+    say("x is greater than 40")
+} else {
+    say("x is not greater than 40")
+}
+
+# While Loop
+count <- 0
+while count < 3 {
+    say("While loop: " + str(count))
+    count <- count + 1
+}
+
+# For Loop
+for item in my_list {
+    say("List item: " + str(item))
+}
+
+# For Loop over String
+for char in "Hi" {
+    say("Character: " + char)
+}
+
+# Repeat Loop
+repeat 2 {
+    say("Repeat loop")
+}

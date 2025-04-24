@@ -1,0 +1,16 @@
+# Testing functions
+say("Functions Test")
+
+act greet(name) {
+    return "Hello, " + name
+}
+
+act factorial(n) {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+say(greet("Bob"))
+say(factorial(5))

@@ -1,0 +1,10 @@
+# list_maps.ly
+say("Lists and Maps Test")
+my_list <- [1, 2, 3, "four"]
+my_map <- {"name": "Alice", "age": 25}
+say(my_list[0])
+say(my_map["name"])
+my_list <- append(my_list, 5)
+say(my_list)
+my_map["city"] <- "Wonderland"
+say(my_map)

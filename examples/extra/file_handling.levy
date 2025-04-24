@@ -1,0 +1,11 @@
+# Testing file handling
+say("File Handling Test")
+
+file <- open("test.txt", "w")
+file.write("Hello, Levython!")
+file.close()
+
+file <- open("test.txt", "r")
+content <- file.read()
+file.close()
+say("File content: " + content)

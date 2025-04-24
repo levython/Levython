@@ -1,0 +1,17 @@
+# Testing error handling
+say("Error Handling Test")
+
+try {
+    x <- int("not_a_number")  # This will throw an error
+    say("This won't execute")
+} catch {
+    say("Caught an error as expected")
+}
+
+try {
+    say("This will execute")
+    x <- 10 / 2
+    say("Result: " + str(x))
+} catch {
+    say("This won't execute")
+}

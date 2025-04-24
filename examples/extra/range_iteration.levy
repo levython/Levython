@@ -1,0 +1,12 @@
+# Testing range and iteration
+say("Range and Iteration Test")
+
+# Range with single argument
+for i in range(3) {
+    say("Index: " + str(i))
+}
+
+# Range with start, stop, step
+for i in range(2, 8, 2) {
+    say("Even number: " + str(i))
+}
