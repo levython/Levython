@@ -65,7 +65,7 @@ Use the compiled binary or downloaded release binary to run scripts or start the
 - **Linux/macOS**:
   - Run a script:
     ```bash
-    ./levython examples/file_io.ly
+    ./levython examples/file_io.levy
     ```
   - Start REPL:
     ```bash
@@ -75,7 +75,7 @@ Use the compiled binary or downloaded release binary to run scripts or start the
 - **Windows**:
   - Run a script:
     ```bash
-    levython.exe examples\file_io.ly
+    levython.exe examples\file_io.levy
     ```
   - Start REPL:
     ```bash
