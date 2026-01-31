@@ -3657,15 +3657,142 @@ public:
     }
 
     void run_repl() {
-        std::string line;
-        std::cout << "Levython REPL (Alpha v0.1.0) (type 'exit' to quit)\n";
+        std::cout << "\n";
+        std::cout << "  Levython REPL v1.0.0\n";
+        std::cout << "  Type 'help' for commands, 'exit' to quit\n";
+        std::cout << "\n";
+        
+        std::vector<std::string> history;
+        int history_index = -1;
+        std::string multiline_buffer;
+        bool in_multiline = false;
+        int brace_count = 0;
+        int paren_count = 0;
+        int bracket_count = 0;
+        
         while (true) {
-            std::cout << "> ";
+            // Prompt
+            if (in_multiline) {
+                std::cout << "... ";
+            } else {
+                std::cout << ">>> ";
+            }
+            
+            std::string line;
             if (!std::getline(std::cin, line)) break;
-            if (line == "exit") break;
-            if (line.empty()) continue;
-            execute(line, "<stdin>");
+            
+            // Handle empty line
+            if (line.empty()) {
+                if (in_multiline) {
+                    // End multiline on double empty
+                    in_multiline = false;
+                    if (!multiline_buffer.empty()) {
+                        history.push_back(multiline_buffer);
+                        execute(multiline_buffer, "<repl>");
+                        multiline_buffer.clear();
+                    }
+                    brace_count = paren_count = bracket_count = 0;
+                }
+                continue;
+            }
+            
+            // Built-in REPL commands
+            if (!in_multiline) {
+                if (line == "exit" || line == "quit") break;
+                
+                if (line == "help") {
+                    std::cout << "\n";
+                    std::cout << "  REPL Commands:\n";
+                    std::cout << "    help      Show this help message\n";
+                    std::cout << "    exit      Exit the REPL\n";
+                    std::cout << "    clear     Clear the screen\n";
+                    std::cout << "    history   Show command history\n";
+                    std::cout << "    version   Show version info\n";
+                    std::cout << "\n";
+                    std::cout << "  Language Quick Reference:\n";
+                    std::cout << "    x <- 10           Variable assignment\n";
+                    std::cout << "    say(\"hi\")         Print output\n";
+                    std::cout << "    act foo() { }     Define function\n";
+                    std::cout << "    -> value          Return from function\n";
+                    std::cout << "    if x > 0 { }      Conditional\n";
+                    std::cout << "    for i in list { } Loop\n";
+                    std::cout << "\n";
+                    continue;
+                }
+                
+                if (line == "clear") {
+                    std::cout << "\033[2J\033[H";
+                    continue;
+                }
+                
+                if (line == "history") {
+                    std::cout << "\n";
+                    for (size_t i = 0; i < history.size(); i++) {
+                        std::cout << "  " << (i + 1) << ": " << history[i] << "\n";
+                    }
+                    std::cout << "\n";
+                    continue;
+                }
+                
+                if (line == "version") {
+                    std::cout << "  Levython 1.0.0\n";
+                    std::cout << "  JIT: x86-64 native compilation\n";
+                    std::cout << "  VM: FastVM with NaN-boxing\n";
+                    continue;
+                }
+                
+                // History recall: !n or !!
+                if (line[0] == '!') {
+                    if (line == "!!" && !history.empty()) {
+                        line = history.back();
+                        std::cout << "  " << line << "\n";
+                    } else if (line.size() > 1) {
+                        try {
+                            int idx = std::stoi(line.substr(1)) - 1;
+                            if (idx >= 0 && idx < (int)history.size()) {
+                                line = history[idx];
+                                std::cout << "  " << line << "\n";
+                            }
+                        } catch (...) {}
+                    }
+                }
+            }
+            
+            // Count braces for multiline detection
+            for (char c : line) {
+                if (c == '{') brace_count++;
+                else if (c == '}') brace_count--;
+                else if (c == '(') paren_count++;
+                else if (c == ')') paren_count--;
+                else if (c == '[') bracket_count++;
+                else if (c == ']') bracket_count--;
+            }
+            
+            // Check if we need multiline mode
+            if (brace_count > 0 || paren_count > 0 || bracket_count > 0) {
+                in_multiline = true;
+                multiline_buffer += line + "\n";
+                continue;
+            }
+            
+            // Complete multiline if balanced
+            if (in_multiline) {
+                multiline_buffer += line + "\n";
+                if (brace_count == 0 && paren_count == 0 && bracket_count == 0) {
+                    in_multiline = false;
+                    history.push_back(multiline_buffer);
+                    execute(multiline_buffer, "<repl>");
+                    multiline_buffer.clear();
+                }
+                continue;
+            }
+            
+            // Single line execution
+            history.push_back(line);
+            execute(line, "<repl>");
         }
+        
+        std::cout << "\nGoodbye!\n";
     }
 
 private:
@@ -3676,11 +3803,11 @@ void execute(const std::string& source, const std::string& context_name) {
     try {
         auto ast = parser.parse();
         Value result = evaluate(ast.get(), current_env, false);
-        if (context_name == "<stdin>" && result.type != ObjectType::NONE) {
-            std::cout << result.to_string() << std::endl;
+        if (context_name == "<repl>" && result.type != ObjectType::NONE) {
+            std::cout << "=> " << result.to_string() << std::endl;
         }
     } catch (const std::runtime_error& e) {
-        std::cerr << "Error in " << context_name << ": " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
     }
 }
 
