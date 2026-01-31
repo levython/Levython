@@ -7859,15 +7859,13 @@ int main(int argc, char* argv[]) {
         return UpdateManager().run(argc, argv);
     }
     
-    bool use_legacy = false;
     bool show_version = false;
     bool no_update_check = false;
     std::string file;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
-        if (arg == "--legacy" || arg == "-l") use_legacy = true;
-        else if (arg == "--no-update-check") no_update_check = true;
+        if (arg == "--no-update-check") no_update_check = true;
         else if (arg == "--version" || arg == "-v") show_version = true;
         else if (arg == "--help" || arg == "-h") {
             std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
@@ -7878,7 +7876,6 @@ int main(int argc, char* argv[]) {
             std::cout << "║  Options:                                                            ║\n";
             std::cout << "║    --help, -h        Show this help message                          ║\n";
             std::cout << "║    --version, -v     Show version information                        ║\n";
-            std::cout << "║    --legacy, -l      Use legacy tree-walk interpreter                ║\n";
             std::cout << "║    --no-update-check Disable automatic update check                  ║\n";
             std::cout << "║                                                                      ║\n";
             std::cout << "║  Commands:                                                           ║\n";
@@ -7894,10 +7891,9 @@ int main(int argc, char* argv[]) {
     }
     
     if (show_version) {
-        std::cout << "Levython 1.0.0 - The Future of Systems Programming\n";
-        std::cout << "JIT: x86-64 native compilation enabled\n";
-        std::cout << "VM: FastVM with NaN-boxing (8-byte values)\n";
-        std::cout << "Performance: Beats C on recursive benchmarks!\n";
+        std::cout << "Levython 1.0.0 - High Performance Programming\n";
+        std::cout << "Engine: FastVM with NaN-boxing + x86-64 JIT\n";
+        std::cout << "Performance: fib(35) ~45ms, fib(40) ~480ms\n";
         return 0;
     }
     
@@ -7916,13 +7912,7 @@ int main(int argc, char* argv[]) {
     if (!ifs) { std::cerr << "Cannot open: " << file << std::endl; return 1; }
     std::string code((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     
-    // Legacy mode: use slow tree-walk interpreter
-    if (use_legacy) {
-        Interpreter().run_file(file);
-        return 0;
-    }
-    
-    // Default: BLAZING FAST bytecode compilation + NaN-boxed VM
+    // BLAZING FAST bytecode compilation + NaN-boxed VM
     Lexer lexer(code);
     auto tokens = lexer.tokenize();
     Parser parser(tokens);
@@ -7930,10 +7920,9 @@ int main(int argc, char* argv[]) {
     Compiler compiler;
     auto chunk = compiler.compile(ast.get());
     
-    // Run with FastVM - the only VM worth using!
+    // Run with FastVM - built with sleepless nights!
     FastVM vm;
     vm.run(chunk.get());
     
     return 0;
 }
-
