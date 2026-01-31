@@ -140,14 +140,11 @@ compile_levython() {
     
     # Get script directory
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
-    # Check if we're in the source directory
+    # Always expect src/levython.cpp relative to script (works for curl install and local)
     if [ -f "$SCRIPT_DIR/src/levython.cpp" ]; then
         SRC_FILE="$SCRIPT_DIR/src/levython.cpp"
-    elif [ -f "src/levython.cpp" ]; then
-        SRC_FILE="src/levython.cpp"
     else
-        error "Cannot find src/levython.cpp. Run this script from the Levython directory."
+        error "Cannot find src/levython.cpp. Please clone the Levython repository and run install.sh from the project root.\n\nExample:\n  git clone https://github.com/levython/Levython.git\n  cd Levython\n  ./install.sh"
     fi
     
     # Compile with optimizations
