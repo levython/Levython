@@ -1,0 +1,100 @@
+# ==============================================================================
+# 08_strings.levy - String Operations
+# ==============================================================================
+# Strings are sequences of characters enclosed in quotes
+#
+# Key operations:
+#   - Concatenation: str1 + str2
+#   - Length: len(string)
+#   - Convert to string: str(value)
+# ==============================================================================
+
+say("=== Creating Strings ===")
+
+message <- "Hello, World!"
+say(message)
+
+name <- "Levython"
+say("Language: " + name)
+
+say("")
+say("=== String Concatenation ===")
+
+first <- "Hello"
+second <- "World"
+combined <- first + ", " + second + "!"
+say(combined)
+
+# Building strings dynamically
+greeting <- "Welcome to "
+greeting <- greeting + "Levython "
+greeting <- greeting + "programming!"
+say(greeting)
+
+say("")
+say("=== Converting to Strings ===")
+
+# Convert numbers to strings
+num <- 42
+say("The answer is: " + str(num))
+
+pi <- 3.14159
+say("Pi is approximately: " + str(pi))
+
+flag <- true
+say("Boolean value: " + str(flag))
+
+say("")
+say("=== String Length ===")
+
+text <- "Levython"
+say("Text: " + text)
+say("Length: " + str(len(text)))
+
+sentence <- "The quick brown fox"
+say("Sentence: " + sentence)
+say("Length: " + str(len(sentence)))
+
+say("")
+say("=== Strings in Expressions ===")
+
+username <- "Alice"
+score <- 100
+
+# Build formatted output
+output <- "Player: " + username + " | Score: " + str(score)
+say(output)
+
+say("")
+say("=== Strings and Lists ===")
+
+words <- ["Levython", "is", "fast", "and", "fun!"]
+sentence <- ""
+
+for word in words {
+    sentence <- sentence + word + " "
+}
+say("Joined: " + sentence)
+
+say("")
+say("=== Multi-line Output ===")
+
+say("Line 1: Introduction")
+say("Line 2: Variables are assigned with <-")
+say("Line 3: Functions are defined with 'act'")
+say("Line 4: Return values use '->'")
+
+say("")
+say("=== Building a Report ===")
+
+item <- "Widget"
+quantity <- 5
+price <- 19.99
+total <- quantity * price
+
+say("=========================")
+say("Item:     " + item)
+say("Quantity: " + str(quantity))
+say("Price:    $" + str(price))
+say("Total:    $" + str(total))
+say("=========================")

@@ -1,5 +1,0 @@
-lst <- []
-repeat 1000 {
-lst <- append(lst, 42)
-}
-say(len(lst))

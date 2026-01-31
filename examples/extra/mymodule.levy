@@ -1,6 +1,0 @@
-# mymodule.ly
-PI <- 3.14159
-
-act square(n) {
-    return n * n
-}

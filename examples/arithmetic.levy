@@ -1,6 +1,0 @@
-count <- 0
-i <- 0 
-
-repeat 1000000 { 
-  count <- count + i i <- i + 1 
-} say(count)

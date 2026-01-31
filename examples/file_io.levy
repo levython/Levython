@@ -1,6 +1,0 @@
-file <- open("output.txt", "w")
-repeat 1000 {
-file.write("Hello, Universe!\n")
-}
-file.close()
-say("Done")

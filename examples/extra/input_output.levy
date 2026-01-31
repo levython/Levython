@@ -1,4 +1,0 @@
-# Testing input/output with ask
-say("Input/Output Test")
-name <- ask("Enter your name: ")
-say("Hello, " + name + "!")

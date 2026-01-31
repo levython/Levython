@@ -1,0 +1,39 @@
+# Compiled binaries
+levython
+lpm
+*.o
+*.out
+*.exe
+
+# macOS
+.DS_Store
+*.dSYM/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Benchmark/test files
+*.benchmark
+benchmark_*
+test_*
+*.test
+
+# Build outputs
+build/
+dist/
+
+# Temporary files
+*.tmp
+*.log
+*.txt
+!examples/*.txt
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Package manager
+~/.levython/

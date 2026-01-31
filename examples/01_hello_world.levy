@@ -1,0 +1,13 @@
+# ==============================================================================
+# 01_hello_world.levy - Your First Levython Program
+# ==============================================================================
+# Welcome to Levython! This is the traditional first program.
+#
+# Key Concepts:
+#   - say() prints output to the console
+#   - Strings use double quotes "like this"
+#   - Comments start with #
+# ==============================================================================
+
+say("Hello, World!")
+say("Welcome to Levython - The Future of Systems Programming!")

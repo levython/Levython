@@ -1,0 +1,94 @@
+# ==============================================================================
+# 07_lists.levy - Working with Lists
+# ==============================================================================
+# Lists store multiple values and are created with square brackets []
+#
+# Key operations:
+#   - Create: mylist <- [1, 2, 3]
+#   - Access: mylist[0]  (0-indexed)
+#   - Append: append(mylist, value)
+#   - Length: len(mylist)
+# ==============================================================================
+
+say("=== Creating Lists ===")
+
+numbers <- [1, 2, 3, 4, 5]
+say("Numbers: " + str(numbers))
+
+names <- ["Alice", "Bob", "Charlie"]
+say("Names: " + str(names))
+
+mixed <- [42, "hello", 3.14, true]
+say("Mixed types: " + str(mixed))
+
+empty <- []
+say("Empty list: " + str(empty))
+
+say("")
+say("=== Accessing Elements ===")
+
+fruits <- ["apple", "banana", "cherry", "date"]
+say("First fruit: " + fruits[0])
+say("Second fruit: " + fruits[1])
+say("Third fruit: " + fruits[2])
+
+say("")
+say("=== List Length ===")
+
+items <- [10, 20, 30, 40, 50]
+say("List: " + str(items))
+say("Length: " + str(len(items)))
+
+say("")
+say("=== Appending to Lists ===")
+
+colors <- ["red", "green"]
+say("Before append: " + str(colors))
+
+append(colors, "blue")
+say("After append 'blue': " + str(colors))
+
+append(colors, "yellow")
+say("After append 'yellow': " + str(colors))
+
+say("")
+say("=== Iterating Over Lists ===")
+
+scores <- [95, 87, 92, 78, 88]
+say("Scores:")
+
+for score in scores {
+    say("  - " + str(score))
+}
+
+say("")
+say("=== List Operations Example ===")
+
+# Calculate sum and average
+values <- [10, 20, 30, 40, 50]
+total <- 0
+
+for v in values {
+    total <- total + v
+}
+
+say("Values: " + str(values))
+say("Sum: " + str(total))
+say("Average: " + str(total / len(values)))
+
+say("")
+say("=== Building a List ===")
+
+squares <- []
+for i in range(1, 6) {
+    append(squares, i * i)
+}
+say("Squares 1-5: " + str(squares))
+
+say("")
+say("=== Nested Access Example ===")
+
+matrix <- [[1, 2], [3, 4], [5, 6]]
+say("Matrix: " + str(matrix))
+say("First row: " + str(matrix[0]))
+say("Element [1][0]: " + str(matrix[1][0]))
