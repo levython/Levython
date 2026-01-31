@@ -7624,6 +7624,229 @@ public:
 };
 
 
+// ============================================================================
+//  UPDATE SYSTEM - Check and install Levython updates
+// ============================================================================
+
+class UpdateManager {
+private:
+    const std::string CURRENT_VERSION = "1.0.0";
+    const std::string GITHUB_REPO = "levython/Levython";
+    const std::string UPDATE_CHECK_URL = "https://api.github.com/repos/levython/Levython/releases/latest";
+    
+    fs::path levython_home;
+    fs::path update_cache;
+    fs::path last_check_file;
+    
+    const std::string RESET = "\033[0m";
+    const std::string RED = "\033[91m";
+    const std::string GREEN = "\033[92m";
+    const std::string YELLOW = "\033[93m";
+    const std::string BLUE = "\033[94m";
+    const std::string CYAN = "\033[96m";
+    const std::string BOLD = "\033[1m";
+    
+    void init_dirs() {
+        const char* home = std::getenv("HOME");
+        if (!home) home = ".";
+        levython_home = fs::path(home) / ".levython";
+        update_cache = levython_home / "cache";
+        last_check_file = levython_home / ".last_update_check";
+        fs::create_directories(update_cache);
+    }
+    
+    // Parse version string to compare (e.g., "1.2.3" -> 1002003)
+    int parse_version(const std::string& ver) {
+        int major = 0, minor = 0, patch = 0;
+        std::sscanf(ver.c_str(), "%d.%d.%d", &major, &minor, &patch);
+        return major * 1000000 + minor * 1000 + patch;
+    }
+    
+    // Check if we should check for updates (once per day)
+    bool should_check() {
+        if (!fs::exists(last_check_file)) return true;
+        
+        auto last_mod = fs::last_write_time(last_check_file);
+        auto now = fs::file_time_type::clock::now();
+        auto hours = std::chrono::duration_cast<std::chrono::hours>(now - last_mod).count();
+        
+        return hours >= 24;  // Check once per day
+    }
+    
+    void update_check_time() {
+        std::ofstream f(last_check_file);
+        f << std::time(nullptr);
+        f.close();
+    }
+    
+    // Fetch latest version from GitHub (using curl with timeout)
+    std::string fetch_latest_version() {
+        std::string cmd = "curl -s --connect-timeout 3 --max-time 5 -H 'Accept: application/vnd.github.v3+json' "
+                          "'https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest' 2>/dev/null";
+        
+        FILE* pipe = popen(cmd.c_str(), "r");
+        if (!pipe) return "";
+        
+        std::string result;
+        char buffer[256];
+        while (fgets(buffer, sizeof(buffer), pipe)) {
+            result += buffer;
+        }
+        pclose(pipe);
+        
+        // Parse "tag_name" from JSON response
+        size_t pos = result.find("\"tag_name\"");
+        if (pos == std::string::npos) return "";
+        
+        size_t start = result.find("\"", pos + 10) + 1;
+        size_t end = result.find("\"", start);
+        if (start == std::string::npos || end == std::string::npos) return "";
+        
+        std::string tag = result.substr(start, end - start);
+        // Remove 'v' prefix if present
+        if (!tag.empty() && tag[0] == 'v') tag = tag.substr(1);
+        
+        return tag;
+    }
+    
+public:
+    UpdateManager() { init_dirs(); }
+    
+    std::string get_current_version() { return CURRENT_VERSION; }
+    
+    // Check for updates silently (for startup check)
+    void check_updates_silent() {
+        if (!should_check()) return;
+        
+        std::string latest = fetch_latest_version();
+        if (latest.empty()) return;
+        
+        update_check_time();
+        
+        if (parse_version(latest) > parse_version(CURRENT_VERSION)) {
+            std::cout << "\n";
+            std::cout << YELLOW << "  Update available: " << RESET 
+                      << CURRENT_VERSION << " -> " << GREEN << latest << RESET << "\n";
+            std::cout << "  Run '" << CYAN << "levython update" << RESET << "' to install\n";
+            std::cout << "\n";
+        }
+    }
+    
+    // Check for updates (verbose)
+    int check() {
+        std::cout << BLUE << "Checking for updates..." << RESET << "\n";
+        
+        std::string latest = fetch_latest_version();
+        update_check_time();
+        
+        if (latest.empty()) {
+            std::cout << YELLOW << "Could not check for updates (no internet?)" << RESET << "\n";
+            return 1;
+        }
+        
+        std::cout << "  Current version: " << CURRENT_VERSION << "\n";
+        std::cout << "  Latest version:  " << latest << "\n\n";
+        
+        if (parse_version(latest) > parse_version(CURRENT_VERSION)) {
+            std::cout << GREEN << "New version available!" << RESET << "\n";
+            std::cout << "Run '" << CYAN << "levython update install" << RESET << "' to update\n";
+            return 0;
+        } else {
+            std::cout << GREEN << "You are running the latest version." << RESET << "\n";
+            return 0;
+        }
+    }
+    
+    // Install update
+    int install_update() {
+        std::cout << BLUE << "Updating Levython..." << RESET << "\n\n";
+        
+        std::string latest = fetch_latest_version();
+        if (latest.empty()) {
+            std::cout << RED << "Could not fetch update information" << RESET << "\n";
+            return 1;
+        }
+        
+        if (parse_version(latest) <= parse_version(CURRENT_VERSION)) {
+            std::cout << GREEN << "Already running the latest version (" << CURRENT_VERSION << ")" << RESET << "\n";
+            return 0;
+        }
+        
+        std::cout << "  Updating: " << CURRENT_VERSION << " -> " << GREEN << latest << RESET << "\n\n";
+        
+        // Download and run install script
+        std::cout << BLUE << "Downloading update..." << RESET << "\n";
+        
+        std::string install_cmd = 
+            "cd /tmp && "
+            "rm -rf levython-update && "
+            "git clone --depth 1 https://github.com/" + GITHUB_REPO + ".git levython-update 2>/dev/null && "
+            "cd levython-update && "
+            "chmod +x install.sh && "
+            "./install.sh";
+        
+        int result = std::system(install_cmd.c_str());
+        
+        if (result == 0) {
+            std::cout << "\n" << GREEN << "Update successful!" << RESET << "\n";
+            std::cout << "Restart your terminal to use Levython " << latest << "\n";
+        } else {
+            std::cout << "\n" << RED << "Update failed" << RESET << "\n";
+            std::cout << "Try manual update: git clone https://github.com/" << GITHUB_REPO << ".git && ./install.sh\n";
+        }
+        
+        // Cleanup
+        std::system("rm -rf /tmp/levython-update 2>/dev/null");
+        
+        return result == 0 ? 0 : 1;
+    }
+    
+    void print_help() {
+        std::cout << "\n";
+        std::cout << CYAN << "Levython Update Manager" << RESET << "\n\n";
+        std::cout << "Usage: levython update [command]\n\n";
+        std::cout << "Commands:\n";
+        std::cout << "  check     Check for available updates\n";
+        std::cout << "  install   Download and install latest version\n";
+        std::cout << "  version   Show current version\n";
+        std::cout << "\nExamples:\n";
+        std::cout << "  levython update           Check for updates\n";
+        std::cout << "  levython update install   Install latest version\n";
+        std::cout << "\n";
+    }
+    
+    int run(int argc, char* argv[]) {
+        if (argc < 3) {
+            return check();
+        }
+        
+        std::string cmd = argv[2];
+        
+        if (cmd == "help" || cmd == "-h") {
+            print_help();
+            return 0;
+        }
+        
+        if (cmd == "check") {
+            return check();
+        }
+        
+        if (cmd == "install" || cmd == "upgrade") {
+            return install_update();
+        }
+        
+        if (cmd == "version") {
+            std::cout << "Levython " << CURRENT_VERSION << "\n";
+            return 0;
+        }
+        
+        std::cout << RED << "Unknown command: " << cmd << RESET << "\n";
+        print_help();
+        return 1;
+    }
+};
+
+
 // Main function to run the interpreter
 int main(int argc, char* argv[]) {
     // Check for LPM mode
@@ -7631,34 +7854,39 @@ int main(int argc, char* argv[]) {
         return LPM().run(argc, argv);
     }
     
+    // Check for update mode
+    if (argc >= 2 && std::string(argv[1]) == "update") {
+        return UpdateManager().run(argc, argv);
+    }
+    
     bool use_legacy = false;
     bool show_version = false;
+    bool no_update_check = false;
     std::string file;
     
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--legacy" || arg == "-l") use_legacy = true;
+        else if (arg == "--no-update-check") no_update_check = true;
         else if (arg == "--version" || arg == "-v") show_version = true;
         else if (arg == "--help" || arg == "-h") {
             std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
-            std::cout << "║     🚀 LEVYTHON - THE FUTURE OF SYSTEMS PROGRAMMING 🚀              ║\n";
+            std::cout << "║           LEVYTHON - High Performance Programming                   ║\n";
             std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
             std::cout << "║  Usage: levython [options] <file.levy|.ly>                           ║\n";
             std::cout << "║                                                                      ║\n";
             std::cout << "║  Options:                                                            ║\n";
-            std::cout << "║    --help, -h     Show this help message                             ║\n";
-            std::cout << "║    --version, -v  Show version information                           ║\n";
-            std::cout << "║    --legacy, -l   Use legacy tree-walk interpreter                   ║\n";
+            std::cout << "║    --help, -h        Show this help message                          ║\n";
+            std::cout << "║    --version, -v     Show version information                        ║\n";
+            std::cout << "║    --legacy, -l      Use legacy tree-walk interpreter                ║\n";
+            std::cout << "║    --no-update-check Disable automatic update check                  ║\n";
             std::cout << "║                                                                      ║\n";
-            std::cout << "║  Performance:                                                        ║\n";
-            std::cout << "║    • fib(35): ~45ms (FASTER than C!)                                ║\n";
-            std::cout << "║    • fib(40): ~480ms (beats GCC -O3)                                ║\n";
+            std::cout << "║  Commands:                                                           ║\n";
+            std::cout << "║    levython lpm <cmd>     Package manager                            ║\n";
+            std::cout << "║    levython update        Check for updates                          ║\n";
+            std::cout << "║    levython update install Install latest version                    ║\n";
             std::cout << "║                                                                      ║\n";
-            std::cout << "║  Features:                                                           ║\n";
-            std::cout << "║    • Real x86-64 JIT compilation (C-speed performance)              ║\n";
-            std::cout << "║    • NaN-boxing (8-byte values, 13x more cache efficient)           ║\n";
-            std::cout << "║    • Hardware primitives: mem_alloc, bitwise ops                    ║\n";
-            std::cout << "║    • AI/ML ready: tensor operations, SIMD                           ║\n";
+            std::cout << "║  Performance: fib(35) ~45ms, fib(40) ~480ms (faster than C)         ║\n";
             std::cout << "╚══════════════════════════════════════════════════════════════════════╝\n";
             return 0;
         }
@@ -7671,6 +7899,11 @@ int main(int argc, char* argv[]) {
         std::cout << "VM: FastVM with NaN-boxing (8-byte values)\n";
         std::cout << "Performance: Beats C on recursive benchmarks!\n";
         return 0;
+    }
+    
+    // Check for updates silently (once per day)
+    if (!no_update_check && !file.empty()) {
+        UpdateManager().check_updates_silent();
     }
     
     if (file.empty()) {
