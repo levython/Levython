@@ -144,7 +144,16 @@ compile_levython() {
     if [ -f "$SCRIPT_DIR/src/levython.cpp" ]; then
         SRC_FILE="$SCRIPT_DIR/src/levython.cpp"
     else
-        error "Cannot find src/levython.cpp. Please clone the Levython repository and run install.sh from the project root.\n\nExample:\n  git clone https://github.com/levython/Levython.git\n  cd Levython\n  ./install.sh"
+        step "Source not found. Cloning Levython repository..."
+        CLONE_DIR="$HOME/Levython"
+        if [ -d "$CLONE_DIR" ]; then
+            warn "Directory $CLONE_DIR already exists. Using existing directory."
+        else
+            git clone --depth=1 https://github.com/levython/Levython.git "$CLONE_DIR"
+        fi
+        cd "$CLONE_DIR"
+        exec bash install.sh "$@"
+        exit 1
     fi
     
     # Compile with optimizations
