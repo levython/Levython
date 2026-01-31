@@ -83,7 +83,7 @@ for i in range(1, 5) {
 
 ## Links
 
-- [Levython GitHub](https://github.com/levython/levython)
+- [Levython GitHub](https://github.com/levython/Levython)
 - [Documentation](https://levython.org/docs)
 
 ## License

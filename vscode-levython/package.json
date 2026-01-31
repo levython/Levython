@@ -21,7 +21,7 @@
     "icon": "icon.png",
     "repository": {
         "type": "git",
-        "url": "https://github.com/levython/levython"
+        "url": "https://github.com/levython/Levython"
     },
     "contributes": {
         "languages": [

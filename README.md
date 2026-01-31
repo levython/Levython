@@ -3,8 +3,8 @@
 **A high-performance programming language with x86-64 JIT compilation that beats C!**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/levython/levython)
-[![Release](https://img.shields.io/badge/release-31%20Jan%202026-green.svg)](https://github.com/levython/levython)
+[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/levython/Levython)
+[![Release](https://img.shields.io/badge/release-31%20Jan%202026-green.svg)](https://github.com/levython/Levython)
 
 ---
 
@@ -30,7 +30,7 @@ curl -fsSL https://raw.githubusercontent.com/levython/levython/main/install.sh |
 ### Manual Install
 
 ```bash
-git clone https://github.com/levython/levython.git
+git clone https://github.com/levython/Levython.git
 cd levython
 chmod +x install.sh
 ./install.sh

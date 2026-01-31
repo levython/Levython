@@ -6,7 +6,7 @@
 # Supports: macOS, Linux (Ubuntu, Debian, Fedora, Arch), Windows (WSL/Git Bash)
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/yourusername/levython/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/levython/Levython/main/install.sh | bash
 #   OR
 #   ./install.sh
 #
@@ -15,6 +15,7 @@
 #   2. Install to ~/.levython/bin
 #   3. Add to PATH automatically
 #   4. Install LPM (Levython Package Manager)
+#   5. Install VS Code extension (automatic!)
 # ==============================================================================
 
 set -e
@@ -182,6 +183,44 @@ EOF
     success "Installed lpm -> $BIN_DIR/lpm (native C++, no Python!)"
 }
 
+# Install VS Code Extension
+install_vscode_extension() {
+    step "Installing VS Code extension..."
+    
+    # Check if VS Code is installed
+    VSCODE_EXT_DIR=""
+    
+    if [ -d "$HOME/.vscode/extensions" ]; then
+        VSCODE_EXT_DIR="$HOME/.vscode/extensions"
+    elif [ -d "$HOME/.vscode-server/extensions" ]; then
+        VSCODE_EXT_DIR="$HOME/.vscode-server/extensions"
+    elif [ -d "$HOME/Library/Application Support/Code/User/extensions" ]; then
+        VSCODE_EXT_DIR="$HOME/Library/Application Support/Code/User/extensions"
+    fi
+    
+    # Get script directory
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Check if vscode-levython folder exists
+    if [ -d "$SCRIPT_DIR/vscode-levython" ]; then
+        if [ -n "$VSCODE_EXT_DIR" ]; then
+            # Copy extension to VS Code extensions folder
+            mkdir -p "$VSCODE_EXT_DIR/levython.levython-1.0.0"
+            cp -r "$SCRIPT_DIR/vscode-levython/"* "$VSCODE_EXT_DIR/levython.levython-1.0.0/"
+            success "VS Code extension installed!"
+            echo -e "    ${BLUE}ℹ${NC} Restart VS Code to activate syntax highlighting"
+        else
+            # VS Code not found, copy to .levython folder for manual install
+            mkdir -p "$INSTALL_DIR/vscode-extension"
+            cp -r "$SCRIPT_DIR/vscode-levython/"* "$INSTALL_DIR/vscode-extension/"
+            warn "VS Code not detected. Extension copied to ~/.levython/vscode-extension/"
+            echo -e "    ${BLUE}ℹ${NC} To install manually: cp -r ~/.levython/vscode-extension ~/.vscode/extensions/levython.levython-1.0.0"
+        fi
+    else
+        warn "VS Code extension not found in package"
+    fi
+}
+
 # Add to PATH
 setup_path() {
     step "Setting up PATH..."
@@ -258,7 +297,8 @@ print_completion() {
     echo -e "    ${YELLOW}4.${NC} Install packages:"
     echo -e "       ${GREEN}lpm install math tensor ml${NC}"
     echo ""
-    echo -e "  ${CYAN}Documentation:${NC} https://github.com/yourusername/levython"
+    echo -e "  ${CYAN}VS Code:${NC} Restart VS Code for syntax highlighting"
+    echo -e "  ${CYAN}Docs:${NC} https://github.com/levython/Levython"
     echo ""
 }
 
@@ -269,6 +309,7 @@ main() {
     check_dependencies
     compile_levython
     install_lpm
+    install_vscode_extension
     setup_path
     verify_installation
     
