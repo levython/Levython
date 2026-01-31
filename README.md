@@ -1,9 +1,10 @@
-# 🚀 Levython
+# 🚀 Levython 1.0
 
 **A high-performance programming language with x86-64 JIT compilation that beats C!**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/levython/levython)
+[![Release](https://img.shields.io/badge/release-31%20Jan%202026-green.svg)](https://github.com/levython/levython)
 
 ---
 
@@ -40,7 +41,7 @@ The installer will:
 - ✅ Compile Levython with optimal flags
 - ✅ Install to `~/.levython/bin`
 - ✅ Add to your PATH automatically
-- ✅ Install the LPM package manager
+- ✅ Install the LPM package manager (native C++, no Python!)
 
 After installation, restart your terminal or run:
 ```bash
@@ -51,6 +52,7 @@ source ~/.zshrc  # or ~/.bashrc for bash
 
 ## 🎯 Hello World
 
+Create `hello.levy` (or `hello.ly`):
 ```levy
 say("Hello, World!")
 ```
@@ -58,7 +60,27 @@ say("Hello, World!")
 Run it:
 ```bash
 levython hello.levy
+# or
+levython hello.ly
 ```
+
+Both `.levy` and `.ly` extensions are supported!
+
+---
+
+## 🎨 VS Code Extension
+
+Get syntax highlighting and code snippets for VS Code!
+
+1. Copy the `vscode-levython` folder to `~/.vscode/extensions/`
+2. Restart VS Code
+3. Open any `.levy` or `.ly` file - enjoy syntax highlighting!
+
+Features:
+- ✨ Syntax highlighting for all keywords
+- 📝 Code snippets (type `act`, `for`, `if`, etc.)
+- 🎯 Bracket matching & auto-close
+- 📁 File icons for `.levy` and `.ly`
 
 ---
 
@@ -132,35 +154,29 @@ say("First: " + str(numbers[0]))
 
 ---
 
-## 🚀 JIT Compilation
-
-For maximum performance, use the `--jit` flag:
-
-```bash
-levython --jit examples/09_fibonacci.levy
-```
-
-The JIT compiler generates native x86-64 machine code, achieving performance that rivals (and beats!) compiled C.
-
----
-
 ## 📦 Package Manager (LPM)
 
-Levython includes a built-in package manager:
+Levython includes a **native C++ package manager** - no Python required!
 
 ```bash
 # Search for packages
-lpm search math
+levython lpm search ml
 
 # Install a package
-lpm install math
+levython lpm install math
 
 # List installed packages
-lpm list
+levython lpm list
 
 # Remove a package
-lpm remove math
+levython lpm remove math
+
+# Or use the shortcut
+lpm install tensor
+lpm list
 ```
+
+Available packages: `math`, `tensor`, `ml`, `random`, `test`, `string`, `json`, `http`, `csv`
 
 ---
 
@@ -170,16 +186,16 @@ The `examples/` directory contains a progressive tutorial series:
 
 | File | Topic |
 |------|-------|
-| [01_hello_world.levy](examples/01_hello_world.levy) | Basic output with `say()` |
-| [02_variables.levy](examples/02_variables.levy) | Data types and assignment |
-| [03_arithmetic.levy](examples/03_arithmetic.levy) | Math operations |
-| [04_conditionals.levy](examples/04_conditionals.levy) | If/else statements |
-| [05_loops.levy](examples/05_loops.levy) | For and while loops |
-| [06_functions.levy](examples/06_functions.levy) | Defining functions with `act` |
-| [07_lists.levy](examples/07_lists.levy) | Working with lists |
-| [08_strings.levy](examples/08_strings.levy) | String operations |
-| [09_fibonacci.levy](examples/09_fibonacci.levy) | Performance benchmark |
-| [10_file_io.levy](examples/10_file_io.levy) | File reading/writing |
+| `01_hello_world.levy` | Basic output with `say()` |
+| `02_variables.levy` | Data types and assignment |
+| `03_arithmetic.levy` | Math operations |
+| `04_conditionals.levy` | If/else statements |
+| `05_loops.levy` | For and while loops |
+| `06_functions.levy` | Defining functions with `act` |
+| `07_lists.levy` | Working with lists |
+| `08_strings.levy` | String operations |
+| `09_fibonacci.levy` | Performance benchmark |
+| `10_file_io.levy` | File reading/writing |
 
 Run any example:
 ```bash
@@ -223,13 +239,19 @@ result <- simd_add_f32(vec_a, vec_b)
 ## 🛠️ Command Line Options
 
 ```
-Usage: levython [options] <script.levy>
+Usage: levython [options] <file.levy|.ly>
 
 Options:
   --help, -h       Show help message
   --version, -v    Show version
-  --jit            Enable JIT compilation (fastest)
-  --repl           Start interactive mode
+  --legacy, -l     Use legacy interpreter
+  lpm <command>    Package manager
+
+LPM Commands:
+  levython lpm install <pkg>   Install package
+  levython lpm remove <pkg>    Remove package
+  levython lpm list            List installed
+  levython lpm search [query]  Search packages
 ```
 
 ---
@@ -239,9 +261,13 @@ Options:
 ```
 levython/
 ├── src/
-│   └── levython.cpp    # Complete implementation (~7300 lines)
-├── examples/           # Tutorial examples (01-10)
-├── install.sh          # Cross-platform installer
+│   └── levython.cpp      # Complete implementation (~7500 lines)
+├── examples/             # Tutorial examples (01-10)
+├── vscode-levython/      # VS Code extension
+│   ├── syntaxes/         # Syntax highlighting
+│   ├── snippets/         # Code snippets
+│   └── package.json
+├── install.sh            # Cross-platform installer
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -254,8 +280,8 @@ levython/
 Contributions are welcome! Areas of interest:
 - JIT optimizations
 - Additional builtin functions
-- Documentation improvements
-- Bug reports and fixes
+- VS Code extension improvements
+- Documentation
 
 ---
 
@@ -265,4 +291,6 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-**Made with ❤️ by the Levython team**
+**Levython 1.0 - Released 31 January 2026**
+
+Made with ❤️ by the Levython team

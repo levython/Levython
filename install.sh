@@ -99,12 +99,8 @@ check_dependencies() {
         error "No C++ compiler found. Please install clang++ or g++"
     fi
     
-    # Check for Python (for LPM)
-    if command -v python3 &> /dev/null; then
-        success "Found python3"
-    else
-        warn "python3 not found - LPM may not work"
-    fi
+    # Note: LPM is built into levython (native C++)
+    success "All dependencies satisfied"
 }
 
 # Install dependencies based on OS
@@ -171,23 +167,19 @@ compile_levython() {
     fi
 }
 
-# Install LPM
+# Install LPM (symlink to levython lpm)
 install_lpm() {
-    step "Installing LPM (Levython Package Manager)..."
+    step "Setting up LPM (Levython Package Manager)..."
     
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    
-    if [ -f "$SCRIPT_DIR/lpm" ]; then
-        cp "$SCRIPT_DIR/lpm" "$BIN_DIR/lpm"
-        chmod +x "$BIN_DIR/lpm"
-        success "Installed lpm -> $BIN_DIR/lpm"
-    elif [ -f "lpm" ]; then
-        cp "lpm" "$BIN_DIR/lpm"
-        chmod +x "$BIN_DIR/lpm"
-        success "Installed lpm -> $BIN_DIR/lpm"
-    else
-        warn "LPM not found, skipping"
-    fi
+    # Create lpm as a wrapper script that calls levython lpm
+    cat > "$BIN_DIR/lpm" << 'EOF'
+#!/bin/bash
+# LPM - Levython Package Manager
+# This is a wrapper that calls the native LPM built into levython
+exec "$HOME/.levython/bin/levython" lpm "$@"
+EOF
+    chmod +x "$BIN_DIR/lpm"
+    success "Installed lpm -> $BIN_DIR/lpm (native C++, no Python!)"
 }
 
 # Add to PATH

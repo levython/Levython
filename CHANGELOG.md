@@ -2,7 +2,7 @@
 
 All notable changes to Levython will be documented in this file.
 
-## [1.0.0] - 2025-01-31
+## [1.0.0] - 2026-01-31
 
 ### 🚀 Initial Release
 
