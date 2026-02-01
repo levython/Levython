@@ -3,8 +3,8 @@
 **A high-performance programming language with x86-64 JIT compilation that beats C!**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/levython/Levython)
-[![Release](https://img.shields.io/badge/release-31%20Jan%202026-green.svg)](https://github.com/levython/Levython)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/levython/Levython)
+[![Release](https://img.shields.io/badge/release-1%20Feb%202026-green.svg)](https://github.com/levython/Levython/releases)
 
 📖 **[Official Documentation](https://levython.github.io/documentation/)**
 
@@ -322,6 +322,6 @@ MIT License - see [LICENSE](LICENSE) file.
 
 ---
 
-**Levython 1.0 - Released 31 January 2026**
+**Levython 1.0.1 - Released 1 February 2026**
 
 Made with ❤️ by the Levython team
