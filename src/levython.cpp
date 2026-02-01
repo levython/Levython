@@ -1430,7 +1430,7 @@ enum class OpCode : uint8_t {
     OP_CALL, OP_RETURN,
     OP_GET_INDEX, OP_SET_INDEX,
     OP_ITER_INIT, OP_ITER_NEXT,
-    OP_BUILTIN_SAY, OP_BUILTIN_LEN, OP_BUILTIN_RANGE, OP_BUILTIN_APPEND,
+    OP_BUILTIN_SAY, OP_BUILTIN_LEN, OP_BUILTIN_RANGE, OP_BUILTIN_APPEND, OP_BUILTIN_ASK,
     OP_BUILD_LIST,
     // 🚀 SUPER-INSTRUCTIONS for loop acceleration
     OP_FAST_LOOP_SUM,      // for i in range: s += i (computed in O(1)!)
@@ -4995,6 +4995,16 @@ private:
                     compile_node(node->children[1].get());
                     compile_node(node->children[2].get());
                     emit(OpCode::OP_BUILTIN_APPEND);
+                } else if (name == "ask") {
+                    // ask() or ask(prompt)
+                    if (node->children.size() == 2) {
+                        compile_node(node->children[1].get());
+                        emit(OpCode::OP_BUILTIN_ASK);
+                        emit_byte(1);  // with prompt
+                    } else {
+                        emit(OpCode::OP_BUILTIN_ASK);
+                        emit_byte(0);  // no prompt
+                    }
                 // 🔥 ESSENTIAL BUILTINS: str, int, float, type
                 } else if (name == "str" && node->children.size() == 2) {
                     compile_node(node->children[1].get());
@@ -5390,7 +5400,7 @@ private:
             &&DO_GET_GLOBAL, &&DO_SET_GLOBAL, &&DO_DEFINE_GLOBAL, &&DO_GET_LOCAL, &&DO_SET_LOCAL,
             &&DO_JUMP, &&DO_JUMP_IF_FALSE, &&DO_LOOP, &&DO_CALL, &&DO_RETURN,
             &&DO_GET_INDEX, &&DO_SET_INDEX, &&DO_ITER_INIT, &&DO_ITER_NEXT,
-            &&DO_BUILTIN_SAY, &&DO_BUILTIN_LEN, &&DO_BUILTIN_RANGE, &&DO_BUILTIN_APPEND, &&DO_BUILD_LIST,
+            &&DO_BUILTIN_SAY, &&DO_BUILTIN_LEN, &&DO_BUILTIN_RANGE, &&DO_BUILTIN_APPEND, &&DO_BUILTIN_ASK, &&DO_BUILD_LIST,
             &&DO_FAST_LOOP_SUM, &&DO_FAST_LOOP_COUNT, &&DO_FAST_LOOP_GENERIC,
             // 🔥 CORE builtins
             &&DO_BUILTIN_TIME, &&DO_BUILTIN_MIN, &&DO_BUILTIN_MAX, &&DO_BUILTIN_ABS, &&DO_BUILTIN_SUM,
@@ -6168,6 +6178,18 @@ private:
         DO_BUILTIN_APPEND: {
             uint64_t item = POP();
             as_list(PEEK(0))->push(item);
+        } DISPATCH();
+        
+        DO_BUILTIN_ASK: {
+            uint8_t has_prompt = READ_BYTE();
+            if (has_prompt) {
+                // ask(prompt) - print prompt then read input
+                std::cout << val_to_string(POP());
+            }
+            // Read line from stdin
+            std::string input;
+            std::getline(std::cin, input);
+            PUSH(val_string(g_strings.intern(input)));
         } DISPATCH();
         
         // ===== NEW BUILTINS FOR COMPLETE LANGUAGE =====
