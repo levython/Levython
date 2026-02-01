@@ -8,7 +8,7 @@
  * 
  * @file    levython.cpp
  * @brief   Complete implementation of the Levython programming language
- * @version 1.0.0
+ * @version 1.0.1
  * 
  * OVERVIEW
  * --------
@@ -3662,7 +3662,7 @@ public:
 
     void run_repl() {
         std::cout << "\n";
-        std::cout << "  Levython REPL v1.0.0\n";
+        std::cout << "  Levython REPL v1.0.1\n";
         std::cout << "  Type 'help' for commands, 'exit' to quit\n";
         std::cout << "\n";
         
@@ -3739,7 +3739,7 @@ public:
                 }
                 
                 if (line == "version") {
-                    std::cout << "  Levython 1.0.0\n";
+                    std::cout << "  Levython 1.0.1\n";
                     std::cout << "  JIT: x86-64 native compilation\n";
                     std::cout << "  VM: FastVM with NaN-boxing\n";
                     continue;
@@ -8141,7 +8141,7 @@ act pad_right(s, w, c) { if len(s) >= w { -> s } -> s + repeat(c, w - len(s)) }
             if (e.is_directory()) {
                 std::string name = e.path().filename().string();
                 fs::path mf = e.path() / "lpm.json";
-                std::string ver = "1.0.0";
+                std::string ver = "1.0.1";
                 if (fs::exists(mf)) {
                     std::ifstream f(mf);
                     std::string c((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
@@ -8159,7 +8159,7 @@ public:
     
     void print_header() {
         std::cout << CYAN << "\n╔══════════════════════════════════════════════════════════════════════╗\n"
-                  << "║     📦 LPM - Levython Package Manager v1.0.0                        ║\n"
+                  << "║     📦 LPM - Levython Package Manager v1.0.1                        ║\n"
                   << "║        Native C++ • Fast • No Dependencies                           ║\n"
                   << "╚══════════════════════════════════════════════════════════════════════╝\n" << RESET << std::endl;
     }
@@ -8246,7 +8246,7 @@ public:
 
 class UpdateManager {
 private:
-    const std::string CURRENT_VERSION = "1.0.0";
+    const std::string CURRENT_VERSION = "1.0.1";
     const std::string GITHUB_REPO = "levython/Levython";
     const std::string UPDATE_CHECK_URL = "https://api.github.com/repos/levython/Levython/releases/latest";
     
@@ -8507,7 +8507,7 @@ int main(int argc, char* argv[]) {
     }
     
     if (show_version) {
-        std::cout << "Levython 1.0.0 - High Performance Programming\n";
+        std::cout << "Levython 1.0.1 - High Performance Programming\n";
         std::cout << "Engine: FastVM with NaN-boxing + x86-64 JIT\n";
         std::cout << "Performance: fib(35) ~45ms, fib(40) ~480ms\n";
         return 0;
