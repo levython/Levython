@@ -20,6 +20,9 @@ lpm
 benchmark_*
 test_*
 *.test
+*.txt
+!README.txt
+!examples/README.txt
 
 # Build outputs
 build/
@@ -28,8 +31,13 @@ dist/
 # Temporary files
 *.tmp
 *.log
-*.txt
-!examples/*.txt
+report.txt
+compile_error.log
+
+# Demo and development files
+demo_*.levy
+test_*.levy
+*_test.levy
 
 # Python cache
 __pycache__/
@@ -38,5 +46,7 @@ __pycache__/
 # Package manager
 ~/.levython/
 
-# Documentation
-docs
+# Documentation build outputs
+docs/
+docs/build/
+docs/_build/

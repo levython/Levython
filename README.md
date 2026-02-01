@@ -6,7 +6,7 @@
 [![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/levython/Levython)
 [![Release](https://img.shields.io/badge/release-31%20Jan%202026-green.svg)](https://github.com/levython/Levython)
 
-📖 **[Official Documentation](https://levython.github.io/documentation/)** | 🌐 **[Live Demo](https://levython.github.io/Levython)**
+📖 **[Official Documentation](https://levython.github.io/documentation/)**
 
 ---
 
@@ -38,12 +38,33 @@ chmod +x install.sh
 ./install.sh
 ```
 
-The installer will:
-- ✅ Detect your OS (macOS, Linux, Windows WSL)
-- ✅ Compile Levython with optimal flags
-- ✅ Install to `~/.levython/bin`
-- ✅ Add to your PATH automatically
-- ✅ Install the LPM package manager (native C++, no Python!)
+### Advanced Installation Options
+
+```bash
+# Force reinstallation
+./install.sh --force
+
+# Skip PATH configuration
+./install.sh --no-path
+
+# Skip VS Code extension
+./install.sh --no-vscode
+
+# Use specific compiler
+./install.sh --compiler=clang++
+
+# Show all options
+./install.sh --help
+```
+
+The enhanced installer will:
+- ✅ **Auto-detect OS** (macOS, Linux, Windows WSL/MSYS2/Git Bash)
+- ✅ **Validate C++ compiler** with C++17 support testing
+- ✅ **Install dependencies** automatically if missing
+- ✅ **Compile with optimizations** (O3 → O2 → basic fallback)
+- ✅ **Configure PATH** for all shell types (bash, zsh, fish)
+- ✅ **Cross-platform Windows support** (WSL, MSYS2, MinGW, Git Bash)
+- ✅ **Professional error handling** with detailed troubleshooting
 
 After installation, restart your terminal or run:
 ```bash
@@ -263,13 +284,21 @@ LPM Commands:
 ```
 levython/
 ├── src/
-│   └── levython.cpp      # Complete implementation (~7500 lines)
+│   └── levython.cpp      # Complete implementation (~8500+ lines)
+│                         # - NaN-boxed bytecode VM
+│                         # - Advanced JIT optimization framework
+│                         # - Type specialization & inline caching
+│                         # - Hot loop detection & O(1) optimizations
+│                         # - Professional codebase (cleaned up)
 ├── examples/             # Tutorial examples (01-10)
 ├── vscode-levython/      # VS Code extension
 │   ├── syntaxes/         # Syntax highlighting
 │   ├── snippets/         # Code snippets
 │   └── package.json
-├── install.sh            # Cross-platform installer
+├── install.sh            # Enhanced cross-platform installer
+│                         # - C++17 compiler validation
+│                         # - Multi-environment Windows support
+│                         # - Comprehensive error handling
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE

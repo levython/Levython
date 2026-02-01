@@ -24,7 +24,7 @@ say("a - b = " + str(a - b))    # 7
 say("a * b = " + str(a * b))    # 30
 say("a / b = " + str(a / b))    # 3.333...
 say("a % b = " + str(a % b))    # 1 (remainder)
-say("a ** b = " + str(a ** b))  # 1000 (10^3)
+say("a ^ b = " + str(a ^ b))    # 1000 (10^3)
 
 say("")
 say("=== Math Functions ===")

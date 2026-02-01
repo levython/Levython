@@ -1,24 +1,88 @@
 #!/bin/bash
 # ==============================================================================
-# LEVYTHON INSTALLER
+# LEVYTHON INSTALLER - Enhanced Edition
 # ==============================================================================
 # Cross-platform installation script for Levython programming language
-# Supports: macOS, Linux (Ubuntu, Debian, Fedora, Arch), Windows (WSL/Git Bash)
+# Supports: macOS, Linux (Ubuntu, Debian, Fedora, Arch), Windows (WSL/Git Bash/MSYS2)
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/levython/Levython/main/install.sh | bash
 #   OR
-#   ./install.sh
+#   ./install.sh [options]
+#
+# Options:
+#   --help, -h     Show this help message
+#   --force        Force reinstallation even if already installed
+#   --no-path      Skip PATH configuration
+#   --no-vscode    Skip VS Code extension installation
+#   --compiler=X   Use specific compiler (clang++, g++, etc.)
 #
 # This script will:
-#   1. Compile Levython from source
-#   2. Install to ~/.levython/bin
-#   3. Add to PATH automatically
-#   4. Install LPM (Levython Package Manager)
-#   5. Install VS Code extension (automatic!)
+#   1. Check system requirements and install dependencies if needed
+#   2. Compile Levython from source with optimizations
+#   3. Install to ~/.levython/bin
+#   4. Configure PATH automatically 
+#   5. Install LPM (Levython Package Manager)
+#   6. Install VS Code extension (if available)
 # ==============================================================================
 
 set -e
+
+# Parse command line arguments
+FORCE_INSTALL=false
+NO_PATH=false
+NO_VSCODE=false
+SPECIFIED_COMPILER=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)
+            echo "Levython Installer"
+            echo ""
+            echo "Usage: $0 [options]"
+            echo ""
+            echo "Options:"
+            echo "  --help, -h     Show this help message"
+            echo "  --force        Force reinstallation"
+            echo "  --no-path      Skip PATH configuration"
+            echo "  --no-vscode    Skip VS Code extension"
+            echo "  --compiler=X   Use specific compiler"
+            echo ""
+            echo "Environment Variables:"
+            echo "  CXX            C++ compiler to use"
+            echo "  PREFIX         Installation prefix (default: ~/.levython)"
+            echo ""
+            exit 0
+            ;;
+        --force)
+            FORCE_INSTALL=true
+            shift
+            ;;
+        --no-path)
+            NO_PATH=true
+            shift
+            ;;
+        --no-vscode)
+            NO_VSCODE=true
+            shift
+            ;;
+        --compiler=*)
+            SPECIFIED_COMPILER="${1#*=}"
+            shift
+            ;;
+        *)
+            warn "Unknown option: $1"
+            shift
+            ;;
+    esac
+done
+
+# Allow override of install directory
+if [ -n "$PREFIX" ]; then
+    INSTALL_DIR="$PREFIX"
+    BIN_DIR="$INSTALL_DIR/bin"
+    PACKAGES_DIR="$INSTALL_DIR/packages"
+fi
 
 # Colors for output
 RED='\033[0;31m'
@@ -32,6 +96,24 @@ NC='\033[0m' # No Color
 INSTALL_DIR="$HOME/.levython"
 BIN_DIR="$INSTALL_DIR/bin"
 PACKAGES_DIR="$INSTALL_DIR/packages"
+
+# Global variables
+CXX=""
+OS=""
+
+# Cleanup function for graceful exit
+cleanup() {
+    local exit_code=$?
+    rm -f /tmp/test_cpp17_$$ /tmp/march_test$$ compile_error.log 2>/dev/null
+    if [ $exit_code -ne 0 ]; then
+        echo ""
+        error "Installation failed. Check the error messages above."
+    fi
+    exit $exit_code
+}
+
+# Set trap for cleanup
+trap cleanup EXIT INT TERM
 
 # Print banner
 print_banner() {
@@ -64,15 +146,35 @@ error() {
     exit 1
 }
 
-# Detect OS
+# Detect OS with better Windows support
 detect_os() {
     case "$(uname -s)" in
-        Darwin*)    OS="macos" ;;
-        Linux*)     OS="linux" ;;
-        MINGW*|MSYS*|CYGWIN*) OS="windows" ;;
-        *)          OS="unknown" ;;
+        Darwin*)    echo "macos" ;;
+        Linux*)     
+            if grep -qi microsoft /proc/version 2>/dev/null; then
+                echo "wsl"
+            else
+                echo "linux"
+            fi
+            ;;
+        MINGW*|MSYS*|CYGWIN*) echo "windows" ;;
+        *)          echo "unknown" ;;
     esac
-    echo "$OS"
+}
+
+# Detect Windows environment more precisely
+detect_windows_env() {
+    if [ -n "$MSYSTEM" ]; then
+        echo "msys2"  # MSYS2 environment
+    elif [ -n "$MINGW_PREFIX" ]; then
+        echo "mingw"  # MinGW environment
+    elif command -v cygpath &> /dev/null; then
+        echo "cygwin"  # Cygwin environment
+    elif grep -qi microsoft /proc/version 2>/dev/null; then
+        echo "wsl"     # Windows Subsystem for Linux
+    else
+        echo "native"  # Native Windows (Git Bash, etc.)
+    fi
 }
 
 # Detect shell
@@ -85,52 +187,166 @@ detect_shell() {
     esac
 }
 
+# Check compiler version and C++17 support
+check_compiler_version() {
+    local compiler="$1"
+    local min_version="$2"
+    
+    if ! command -v "$compiler" &> /dev/null; then
+        return 1
+    fi
+    
+    # Test C++17 support
+    local test_file="/tmp/test_cpp17_$$.cpp"
+    cat > "$test_file" << 'EOF'
+#include <iostream>
+#include <optional>
+int main() {
+    std::optional<int> x = 42;
+    return x.has_value() ? 0 : 1;
+}
+EOF
+    
+    if "$compiler" -std=c++17 -o "/tmp/test_cpp17_$$" "$test_file" &>/dev/null; then
+        rm -f "$test_file" "/tmp/test_cpp17_$$" 2>/dev/null
+        return 0
+    else
+        rm -f "$test_file" "/tmp/test_cpp17_$$" 2>/dev/null
+        return 1
+    fi
+}
+
 # Check for required tools
 check_dependencies() {
     step "Checking dependencies..."
     
-    # Check for C++ compiler
-    if command -v clang++ &> /dev/null; then
+    CXX=""
+    
+    # Check for C++ compiler with version validation
+    if check_compiler_version "clang++" "9.0"; then
         CXX="clang++"
-        success "Found clang++"
-    elif command -v g++ &> /dev/null; then
+        local version=$(clang++ --version | head -1)
+        success "Found clang++: $version"
+    elif check_compiler_version "g++" "7.0"; then
         CXX="g++"
-        success "Found g++"
+        local version=$(g++ --version | head -1)
+        success "Found g++: $version"
+    elif command -v clang++ &> /dev/null; then
+        warn "clang++ found but C++17 support test failed"
+        CXX="clang++"
+    elif command -v g++ &> /dev/null; then
+        warn "g++ found but C++17 support test failed"
+        CXX="g++"
     else
-        error "No C++ compiler found. Please install clang++ or g++"
+        error "No suitable C++ compiler found. Please install:
+  • macOS: xcode-select --install
+  • Ubuntu/Debian: sudo apt install build-essential
+  • Fedora: sudo dnf install gcc-c++
+  • Arch: sudo pacman -S base-devel
+  • Windows: Install Visual Studio or MinGW"
     fi
     
-    # Note: LPM is built into levython (native C++)
-    success "All dependencies satisfied"
+    # Additional checks
+    if ! command -v make &> /dev/null && [ "$(detect_os)" != "windows" ]; then
+        warn "make not found - some features may not work"
+    fi
+    
+    success "Dependencies check completed"
 }
 
-# Install dependencies based on OS
+# Install dependencies based on OS with error recovery
 install_dependencies() {
     OS=$(detect_os)
     step "Installing dependencies for $OS..."
     
     case "$OS" in
         macos)
-            if ! command -v clang++ &> /dev/null; then
-                xcode-select --install 2>/dev/null || true
+            if ! check_compiler_version "clang++" "9.0"; then
+                step "Installing Xcode Command Line Tools..."
+                if ! xcode-select --install 2>/dev/null; then
+                    if xcode-select -p &>/dev/null; then
+                        warn "Xcode Command Line Tools already installed but may need update"
+                        warn "Run: sudo xcode-select --reset"
+                    fi
+                fi
+                # Wait a bit and recheck
+                sleep 2
+                if ! check_compiler_version "clang++" "9.0"; then
+                    error "Failed to install suitable C++ compiler. Please install Xcode or Command Line Tools manually."
+                fi
             fi
             ;;
-        linux)
+        linux|wsl)
+            local installed=false
             if command -v apt-get &> /dev/null; then
-                sudo apt-get update -qq
-                sudo apt-get install -y -qq build-essential
+                step "Installing via apt-get..."
+                if sudo apt-get update -qq && sudo apt-get install -y -qq build-essential; then
+                    installed=true
+                else
+                    warn "apt-get installation failed, trying alternative packages"
+                    sudo apt-get install -y -qq gcc g++ make libc6-dev || true
+                fi
             elif command -v dnf &> /dev/null; then
-                sudo dnf install -y gcc-c++ make
+                step "Installing via dnf..."
+                if sudo dnf install -y gcc-c++ make; then
+                    installed=true
+                fi
+            elif command -v yum &> /dev/null; then
+                step "Installing via yum..."
+                if sudo yum groupinstall -y "Development Tools"; then
+                    installed=true
+                fi
             elif command -v pacman &> /dev/null; then
-                sudo pacman -S --noconfirm base-devel
+                step "Installing via pacman..."
+                if sudo pacman -S --noconfirm base-devel; then
+                    installed=true
+                fi
+            elif command -v zypper &> /dev/null; then
+                step "Installing via zypper..."
+                if sudo zypper install -y gcc-c++ make; then
+                    installed=true
+                fi
+            elif command -v apk &> /dev/null; then
+                step "Installing via apk..."
+                if sudo apk add build-base; then
+                    installed=true
+                fi
             fi
+            
+            if ! $installed; then
+                warn "Could not auto-install dependencies. Please install manually:"
+                warn "  Ubuntu/Debian: sudo apt install build-essential"
+                warn "  Fedora: sudo dnf install gcc-c++ make"
+                warn "  Arch: sudo pacman -S base-devel"
+            fi
+            ;;
+        windows)
+            local win_env=$(detect_windows_env)
+            case "$win_env" in
+                "msys2")
+                    if command -v pacman &> /dev/null; then
+                        pacman -S --noconfirm mingw-w64-x86_64-gcc || warn "Failed to install gcc via pacman"
+                    fi
+                    ;;
+                *)
+                    warn "Windows detected. Please ensure you have a C++ compiler installed:"
+                    warn "  • Visual Studio Community (recommended)"
+                    warn "  • MinGW-w64"
+                    warn "  • MSYS2 with development tools"
+                    ;;
+            esac
             ;;
     esac
     
-    success "Dependencies installed"
+    # Re-check after installation attempt
+    if ! command -v "$CXX" &> /dev/null; then
+        check_dependencies
+    fi
+    
+    success "Dependencies installation completed"
 }
 
-# Compile Levython
+# Compile Levython with enhanced error handling
 compile_levython() {
     step "Compiling Levython..."
     
@@ -138,39 +354,101 @@ compile_levython() {
     mkdir -p "$BIN_DIR"
     mkdir -p "$PACKAGES_DIR"
     
-    # Get script directory
+    # Get script directory and source file
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    # Always expect src/levython.cpp relative to script (works for curl install and local)
+    
     if [ -f "$SCRIPT_DIR/src/levython.cpp" ]; then
         SRC_FILE="$SCRIPT_DIR/src/levython.cpp"
     else
         step "Source not found. Cloning Levython repository..."
         CLONE_DIR="$HOME/Levython"
         if [ -d "$CLONE_DIR" ]; then
-            warn "Directory $CLONE_DIR already exists. Using existing directory."
+            warn "Directory $CLONE_DIR already exists. Updating..."
+            cd "$CLONE_DIR" && git pull --depth=1 origin main 2>/dev/null || true
         else
-            git clone --depth=1 https://github.com/levython/Levython.git "$CLONE_DIR"
+            if ! git clone --depth=1 https://github.com/levython/Levython.git "$CLONE_DIR"; then
+                error "Failed to clone repository. Check internet connection."
+            fi
         fi
         cd "$CLONE_DIR"
         exec bash install.sh "$@"
         exit 1
     fi
     
-    # Compile with optimizations
-    OS=$(detect_os)
-    
-    if [ "$OS" = "macos" ]; then
-        $CXX -std=c++17 -O3 -march=native -DNDEBUG \
-            -o "$BIN_DIR/levython" "$SRC_FILE" 2>/dev/null
-    else
-        $CXX -std=c++17 -O3 -march=native -DNDEBUG \
-            -o "$BIN_DIR/levython" "$SRC_FILE" 2>/dev/null
+    # Verify source file exists and is readable
+    if [ ! -r "$SRC_FILE" ]; then
+        error "Source file not found or not readable: $SRC_FILE"
     fi
     
-    if [ $? -eq 0 ]; then
-        success "Compiled levython -> $BIN_DIR/levython"
+    # Determine optimal compilation flags
+    OS=$(detect_os)
+    COMPILE_FLAGS="-std=c++17 -O3 -DNDEBUG"
+    
+    # Test if march=native works
+    if echo 'int main(){}' | $CXX -x c++ -march=native - -o /tmp/march_test$$ 2>/dev/null; then
+        COMPILE_FLAGS="$COMPILE_FLAGS -march=native"
+        rm -f /tmp/march_test$$
     else
-        error "Compilation failed"
+        warn "march=native not supported, using generic optimization"
+    fi
+    
+    # Platform-specific adjustments
+    case "$OS" in
+        "windows")
+            # Windows may need static linking
+            COMPILE_FLAGS="$COMPILE_FLAGS -static-libgcc -static-libstdc++"
+            ;;
+        "macos")
+            # macOS optimizations
+            COMPILE_FLAGS="$COMPILE_FLAGS -mmacosx-version-min=10.14"
+            ;;
+    esac
+    
+    # Try compilation with multiple fallback strategies
+    local compiled=false
+    local output_file="$BIN_DIR/levython"
+    
+    # Strategy 1: Full optimization
+    step "Attempting optimized compilation..."
+    if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>/dev/null; then
+        compiled=true
+        success "Compiled with full optimizations"
+    else
+        warn "Optimized compilation failed, trying with reduced optimization..."
+        
+        # Strategy 2: Reduced optimization
+        COMPILE_FLAGS="-std=c++17 -O2 -DNDEBUG"
+        if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>/dev/null; then
+            compiled=true
+            success "Compiled with reduced optimization"
+        else
+            warn "O2 compilation failed, trying basic compilation..."
+            
+            # Strategy 3: Basic compilation
+            COMPILE_FLAGS="-std=c++17"
+            if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>compile_error.log; then
+                compiled=true
+                warn "Compiled with basic flags (no optimization)"
+            else
+                # Strategy 4: Show detailed error and suggest fixes
+                error "Compilation failed. Error details:\n$(cat compile_error.log 2>/dev/null || echo 'No error log available')\n\nTroubleshooting:\n  1. Ensure C++17 support: $CXX -std=c++17 --version\n  2. Check disk space: df -h\n  3. Verify source integrity: wc -l $SRC_FILE\n  4. Try manual compilation: $CXX -std=c++17 -o levython $SRC_FILE"
+            fi
+        fi
+    fi
+    
+    # Cleanup and verify
+    rm -f compile_error.log 2>/dev/null
+    
+    if $compiled && [ -x "$output_file" ]; then
+        success "Compiled levython -> $output_file"
+        # Test the binary
+        if "$output_file" --version >/dev/null 2>&1; then
+            success "Binary verification passed"
+        else
+            warn "Binary compiled but version check failed - may still work"
+        fi
+    else
+        error "Compilation failed completely"
     fi
 }
 
@@ -227,22 +505,39 @@ install_vscode_extension() {
     fi
 }
 
-# Add to PATH
+# Add to PATH with enhanced Windows support
 setup_path() {
     step "Setting up PATH..."
     
+    local OS=$(detect_os)
     SHELL_NAME=$(detect_shell)
     PATH_LINE="export PATH=\"\$HOME/.levython/bin:\$PATH\""
+    
+    # Handle different environments
+    if [ "$OS" = "windows" ] || [ "$OS" = "wsl" ]; then
+        setup_windows_path
+        return
+    fi
     
     case "$SHELL_NAME" in
         zsh)
             RC_FILE="$HOME/.zshrc"
+            # Also check .zprofile for macOS
+            if [ "$OS" = "macos" ] && [ -f "$HOME/.zprofile" ]; then
+                setup_shell_path "$HOME/.zprofile"
+            fi
             ;;
         bash)
             if [ -f "$HOME/.bash_profile" ]; then
                 RC_FILE="$HOME/.bash_profile"
+            elif [ -f "$HOME/.profile" ]; then
+                RC_FILE="$HOME/.profile"
             else
                 RC_FILE="$HOME/.bashrc"
+                # Ensure .bashrc is sourced from .bash_profile
+                if [ ! -f "$HOME/.bash_profile" ]; then
+                    echo '[ -f ~/.bashrc ] && source ~/.bashrc' > "$HOME/.bash_profile"
+                fi
             fi
             ;;
         fish)
@@ -250,35 +545,125 @@ setup_path() {
             PATH_LINE="set -gx PATH \$HOME/.levython/bin \$PATH"
             mkdir -p "$HOME/.config/fish"
             ;;
+        *)
+            RC_FILE="$HOME/.profile"
+            ;;
     esac
     
-    # Check if already in PATH
-    if grep -q ".levython/bin" "$RC_FILE" 2>/dev/null; then
-        success "PATH already configured in $RC_FILE"
-    else
-        echo "" >> "$RC_FILE"
-        echo "# Levython Programming Language" >> "$RC_FILE"
-        echo "$PATH_LINE" >> "$RC_FILE"
-        success "Added to PATH in $RC_FILE"
-    fi
+    setup_shell_path "$RC_FILE"
     
     # Export for current session
     export PATH="$BIN_DIR:$PATH"
 }
 
-# Verify installation
+# Setup shell PATH helper
+setup_shell_path() {
+    local rc_file="$1"
+    
+    # Create file if it doesn't exist
+    touch "$rc_file"
+    
+    # Check if already in PATH
+    if grep -q ".levython/bin" "$rc_file" 2>/dev/null; then
+        success "PATH already configured in $rc_file"
+    else
+        echo "" >> "$rc_file"
+        echo "# Levython Programming Language" >> "$rc_file"
+        echo "$PATH_LINE" >> "$rc_file"
+        success "Added to PATH in $rc_file"
+    fi
+}
+
+# Windows-specific PATH setup
+setup_windows_path() {
+    local win_env=$(detect_windows_env)
+    
+    case "$win_env" in
+        "wsl")
+            # WSL: Standard Unix approach
+            setup_shell_path "$HOME/.bashrc"
+            # Also try to add to Windows PATH if possible
+            if command -v powershell.exe &> /dev/null; then
+                local win_path=$(powershell.exe -c "[System.Environment]::GetEnvironmentVariable('PATH', 'User')" 2>/dev/null | tr -d '\r')
+                local levy_path="%USERPROFILE%\\.levython\\bin"
+                if [[ "$win_path" != *"$levy_path"* ]]; then
+                    warn "Consider adding to Windows PATH: $levy_path"
+                fi
+            fi
+            ;;
+        "msys2"|"mingw")
+            # MSYS2/MinGW: Use their profile
+            local msys_profile="$HOME/.bash_profile"
+            [ ! -f "$msys_profile" ] && msys_profile="$HOME/.bashrc"
+            setup_shell_path "$msys_profile"
+            ;;
+        "cygwin")
+            # Cygwin: Standard approach
+            setup_shell_path "$HOME/.bashrc"
+            ;;
+        *)
+            # Git Bash or other: Try multiple locations
+            local git_bash_profile="$HOME/.bash_profile"
+            if [ ! -f "$git_bash_profile" ]; then
+                git_bash_profile="$HOME/.bashrc"
+            fi
+            setup_shell_path "$git_bash_profile"
+            
+            # Try to detect and suggest Windows PATH addition
+            warn "For persistent PATH on Windows, consider adding to System Environment Variables:"
+            warn "  Path: %USERPROFILE%\\.levython\\bin"
+            ;;
+    esac
+}
+
+# Verify installation with comprehensive checks
 verify_installation() {
     step "Verifying installation..."
     
+    local success_count=0
+    local total_checks=3
+    
+    # Check 1: Binary exists and is executable
     if [ -x "$BIN_DIR/levython" ]; then
-        VERSION=$("$BIN_DIR/levython" --version 2>&1 | head -1)
-        success "levython installed: $VERSION"
+        success "✓ levython binary is executable"
+        ((success_count++))
+        
+        # Check version output
+        local version_output
+        if version_output=$("$BIN_DIR/levython" --version 2>&1); then
+            success "✓ Version: $(echo "$version_output" | head -1)"
+            ((success_count++))
+        else
+            warn "✗ Version check failed: $version_output"
+        fi
     else
-        error "levython installation failed"
+        error "✗ levython binary not found or not executable at $BIN_DIR/levython"
     fi
     
+    # Check 2: LPM wrapper
     if [ -x "$BIN_DIR/lpm" ]; then
-        success "lpm installed"
+        success "✓ lpm wrapper installed"
+        ((success_count++))
+    else
+        warn "✗ lpm wrapper missing"
+    fi
+    
+    # Check 3: PATH configuration
+    if command -v levython &> /dev/null; then
+        success "✓ levython is in PATH"
+    else
+        warn "✗ levython not found in PATH (may need to restart terminal)"
+        echo "  Current PATH includes: $(echo $PATH | tr ':' '\n' | grep -E '(levython|\.levython)' || echo 'No levython paths found')"
+    fi
+    
+    # Summary
+    echo ""
+    if [ $success_count -eq $total_checks ]; then
+        success "All verification checks passed ($success_count/$total_checks)"
+    elif [ $success_count -gt 0 ]; then
+        warn "Partial installation success ($success_count/$total_checks checks passed)"
+    else
+        error "Installation verification failed (0/$total_checks checks passed)"
     fi
 }
 
@@ -308,18 +693,91 @@ print_completion() {
     echo ""
 }
 
-# Main installation
+# Main installation with enhanced error handling
 main() {
     print_banner
     
-    check_dependencies
-    compile_levython
-    install_lpm
-    install_vscode_extension
-    setup_path
+    # Check if already installed
+    if [ -x "$BIN_DIR/levython" ] && [ "$FORCE_INSTALL" = false ]; then
+        warn "Levython appears to already be installed at $BIN_DIR/levython"
+        read -p "Do you want to reinstall? [y/N] " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            step "Verifying existing installation..."
+            verify_installation
+            exit 0
+        fi
+    fi
+    
+    # Use specified compiler if provided
+    if [ -n "$SPECIFIED_COMPILER" ]; then
+        if command -v "$SPECIFIED_COMPILER" &> /dev/null; then
+            CXX="$SPECIFIED_COMPILER"
+            success "Using specified compiler: $SPECIFIED_COMPILER"
+        else
+            error "Specified compiler not found: $SPECIFIED_COMPILER"
+        fi
+    fi
+    
+    # Installation steps with error recovery
+    local failed_steps=()
+    
+    # Step 1: Check dependencies
+    if ! check_dependencies; then
+        failed_steps+=("dependency_check")
+        step "Attempting to install missing dependencies..."
+        install_dependencies
+        # Retry dependency check
+        if ! check_dependencies; then
+            failed_steps+=("dependency_install")
+            error "Failed to satisfy dependencies. Please install manually and try again."
+        fi
+    fi
+    
+    # Step 2: Compilation
+    if ! compile_levython; then
+        failed_steps+=("compilation")
+        error "Compilation failed. Check the error messages above."
+    fi
+    
+    # Step 3: Setup components (these are optional, failures won't stop installation)
+    install_lpm || warn "LPM installation failed"
+    if [ "$NO_VSCODE" = false ]; then
+        install_vscode_extension || warn "VS Code extension installation failed"
+    else
+        step "Skipping VS Code extension installation (--no-vscode specified)"
+    fi
+    
+    # Step 4: PATH setup
+    if [ "$NO_PATH" = false ]; then
+        if ! setup_path; then
+            failed_steps+=("path_setup")
+            warn "PATH setup failed - you may need to add $BIN_DIR to PATH manually"
+        fi
+    else
+        step "Skipping PATH configuration (--no-path specified)"
+        warn "Remember to add $BIN_DIR to your PATH manually"
+    fi
+    
+    # Step 5: Verification
     verify_installation
     
-    print_completion
+    # Summary
+    if [ ${#failed_steps[@]} -eq 0 ]; then
+        print_completion
+    else
+        echo ""
+        warn "Installation completed with some issues:"
+        for step in "${failed_steps[@]}"; do
+            warn "  - $step failed"
+        done
+        echo ""
+        echo -e "${CYAN}Troubleshooting:${NC}"
+        echo -e "  1. Check error messages above"
+        echo -e "  2. Ensure you have a C++17 compatible compiler"
+        echo -e "  3. Try manual compilation: $CXX -std=c++17 -o levython src/levython.cpp"
+        echo -e "  4. Add to PATH manually: export PATH=\"$BIN_DIR:\$PATH\""
+    fi
 }
 
 # Run main
