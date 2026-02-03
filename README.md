@@ -23,13 +23,43 @@
 
 ## 🔧 Quick Install
 
-### One-Line Install (Recommended)
+### 🪟 Windows (Recommended)
 
+**📥 [Download Installer from Releases](https://github.com/levython/Levython/releases/latest)**
+
+1. Download `levython-1.0.1-windows-installer.exe` from the releases page
+2. Double-click the installer and follow the setup wizard
+3. Done! Open Command Prompt anywhere and type: `levython --version`
+
+**✅ No bash, WSL, Python, or other tools needed!**  
+**✅ Professional one-click installer just like Python**  
+**✅ Works on Windows 10, 11, and Server 2019+**
+
+### 🍎 macOS
+
+**Option 1: One-line install (Recommended)**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/levython/levython/main/install.sh | bash
 ```
 
-### Manual Install
+**Option 2: Download prebuilt binary**
+1. Download `levython-v1.0.1-macos` from [Releases](https://github.com/levython/Levython/releases/latest)
+2. Make executable: `chmod +x levython-v1.0.1-macos`
+3. Move to PATH: `sudo mv levython-v1.0.1-macos /usr/local/bin/levython`
+
+### 🐧 Linux
+
+**Option 1: One-line install (Recommended)**
+```bash
+curl -fsSL https://raw.githubusercontent.com/levython/levython/main/install.sh | bash
+```
+
+**Option 2: Download prebuilt binary**
+1. Download `levython-v1.0.1-generic` from [Releases](https://github.com/levython/Levython/releases/latest)
+2. Make executable: `chmod +x levython-v1.0.1-generic`
+3. Move to PATH: `sudo mv levython-v1.0.1-generic /usr/local/bin/levython`
+
+Or manual:
 
 ```bash
 git clone https://github.com/levython/Levython.git
@@ -38,7 +68,7 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### Advanced Installation Options
+### Advanced Options (Unix)
 
 ```bash
 # Force reinstallation
@@ -57,16 +87,15 @@ chmod +x install.sh
 ./install.sh --help
 ```
 
-The enhanced installer will:
-- ✅ **Auto-detect OS** (macOS, Linux, Windows WSL/MSYS2/Git Bash)
-- ✅ **Validate C++ compiler** with C++17 support testing
-- ✅ **Install dependencies** automatically if missing
-- ✅ **Compile with optimizations** (O3 → O2 → basic fallback)
-- ✅ **Configure PATH** for all shell types (bash, zsh, fish)
-- ✅ **Cross-platform Windows support** (WSL, MSYS2, MinGW, Git Bash)
-- ✅ **Professional error handling** with detailed troubleshooting
+The installer:
+- ✅ **Auto-detects OS** (macOS, Linux, Windows WSL/MSYS2/Git Bash)
+- ✅ **Validates C++ compiler** with C++17 support
+- ✅ **Installs dependencies** automatically if missing
+- ✅ **Compiles with optimizations** (O3 → O2 → basic fallback)
+- ✅ **Configures PATH** for all shell types (bash, zsh, fish)
+- ✅ **Professional error handling** with troubleshooting
 
-After installation, restart your terminal or run:
+After installation, restart your terminal or:
 ```bash
 source ~/.zshrc  # or ~/.bashrc for bash
 ```

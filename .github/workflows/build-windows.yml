@@ -1,0 +1,63 @@
+name: Build Windows Installer
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v1
+    
+    - name: Build Levython
+      run: |
+        cd src
+        cl /O2 /EHsc /std:c++17 /Fe:..\windows\build\levython.exe levython.cpp
+      shell: cmd
+    
+    - name: Create LPM
+      run: |
+        mkdir -p windows\build
+        copy windows\build\levython.exe windows\build\lpm.exe
+      shell: cmd
+    
+    - name: Download Inno Setup
+      run: |
+        Invoke-WebRequest -Uri "https://files.jrsoftware.org/is/6/innosetup-6.2.2.exe" -OutFile "innosetup.exe"
+        .\innosetup.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP-
+        Start-Sleep -Seconds 30
+      shell: powershell
+    
+    - name: Generate Assets
+      run: |
+        mkdir -p windows\assets
+        # Create basic icon and wizard images with PowerShell
+        powershell -ExecutionPolicy Bypass -File windows\create-assets.ps1
+      shell: cmd
+      
+    - name: Build Installer
+      run: |
+        "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows\installer.iss
+      shell: cmd
+    
+    - name: Upload Installer
+      uses: actions/upload-artifact@v3
+      with:
+        name: windows-installer
+        path: releases/levython-*-windows-installer.exe
+    
+    - name: Create Release
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v1
+      with:
+        files: releases/levython-*-windows-installer.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
