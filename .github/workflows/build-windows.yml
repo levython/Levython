@@ -14,8 +14,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
     
-    - name: Setup MSBuild
-      uses: microsoft/setup-msbuild@v2
+    - name: Setup MSVC
+      uses: ilammy/msvc-dev-cmd@v1
+    
+    - name: Create build directory
+      run: mkdir -p windows\build
+      shell: cmd
     
     - name: Build Levython
       run: |
@@ -25,7 +29,6 @@ jobs:
     
     - name: Create LPM
       run: |
-        mkdir -p windows\build
         copy windows\build\levython.exe windows\build\lpm.exe
       shell: cmd
     
