@@ -46,7 +46,5 @@ __pycache__/
 # Package manager
 ~/.levython/
 
-# Documentation build outputs
+# Documentation 
 docs/
-docs/build/
-docs/_build/
