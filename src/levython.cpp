@@ -68,11 +68,20 @@
 #include <utility>
 #include <unordered_map>
 #include <cstdint>
-#include <sys/mman.h>  // For mmap (executable memory)
-#include <sys/stat.h>  // For fstat
-#include <fcntl.h>     // For open()
-#include <unistd.h>    // For close()
 #include <cstring>     // For memcpy
+
+// Platform-specific includes
+#ifdef _WIN32
+    #include <windows.h>
+    #include <io.h>
+    #define MMAP_SUPPORTED 0
+#else
+    #include <sys/mman.h>  // For mmap (executable memory)
+    #include <sys/stat.h>  // For fstat
+    #include <fcntl.h>     // For open()
+    #include <unistd.h>    // For close()
+    #define MMAP_SUPPORTED 1
+#endif
 
 namespace fs = std::filesystem;
 
@@ -238,7 +247,7 @@ class JITCompiler {
 public:
     /**
      * Code buffer for emitting x86-64 machine code
-     * Uses mmap with RWX permissions for direct execution
+     * Uses platform-specific executable memory allocation
      */
     struct CodeBuffer {
         uint8_t* code;
@@ -246,7 +255,8 @@ public:
         size_t capacity;
         
         CodeBuffer() : size(0), capacity(4096) {
-            // Allocate executable memory (RWX) for JIT code
+            // Allocate executable memory for JIT code
+#if MMAP_SUPPORTED
             code = (uint8_t*)mmap(nullptr, capacity, 
                 PROT_READ | PROT_WRITE | PROT_EXEC,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
@@ -254,10 +264,22 @@ public:
                 code = nullptr;
                 capacity = 0;
             }
+#else
+            // Windows: Use VirtualAlloc for executable memory
+            code = (uint8_t*)VirtualAlloc(nullptr, capacity, 
+                MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+            if (!code) {
+                capacity = 0;
+            }
+#endif
         }
         
         ~CodeBuffer() {
+#if MMAP_SUPPORTED
             if (code) munmap(code, capacity);
+#else
+            if (code) VirtualFree(code, 0, MEM_RELEASE);
+#endif
         }
         
         void emit(uint8_t byte) {
@@ -6976,23 +6998,20 @@ private:
         } DISPATCH();
         
         DO_FILE_READ: {
-            //  Advanced FILE READ - MMAP + HUGE BUFFER! 
+            // Advanced FILE READ with platform-optimized I/O
             uint64_t handle_val = POP();
             FILE* f = (FILE*)(uintptr_t)as_int(handle_val);
-            
-            // Get file descriptor for potential mmap
-            int fd = fileno(f);
             
             fseek(f, 0, SEEK_END);
             long size = ftell(f);
             fseek(f, 0, SEEK_SET);
             
-            // Optimization: Use mmap for large files (>64KB)
+#if MMAP_SUPPORTED
+            // Unix: Use mmap for large files (>64KB)
             if (size > 65536) {
-                // Memory-map the file for fast reads
+                int fd = fileno(f);
                 void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (mapped != MAP_FAILED) {
-                    // Advise kernel for sequential access
                     madvise(mapped, size, MADV_SEQUENTIAL);
                     
                     ObjString* result = ObjString::create((const char*)mapped, size);
@@ -7001,6 +7020,7 @@ private:
                     goto file_read_done;
                 }
             }
+#endif
             
             // Fallback: Use large buffer for smaller files
             {
@@ -7107,22 +7127,28 @@ private:
                 sp -= argc + 1;
                 PUSH(VAL_NONE);
             } else if (method_name == "read" && argc == 0) {
-                //  Advanced FILE READ - MMAP! 
+                // Advanced FILE READ with platform optimization
                 FILE* f = (FILE*)(uintptr_t)as_int(obj);
-                int fd = fileno(f);
                 
                 fseek(f, 0, SEEK_END);
                 long size = ftell(f);
                 fseek(f, 0, SEEK_SET);
                 
-                // Use mmap for large files
+#if MMAP_SUPPORTED
+                // Unix: Use mmap for large files
                 if (size > 65536) {
+                    int fd = fileno(f);
                     void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                     if (mapped != MAP_FAILED) {
                         madvise(mapped, size, MADV_SEQUENTIAL);
                         ObjString* result = ObjString::create((const char*)mapped, size);
                         munmap(mapped, size);
                         sp -= argc + 1;
+                        PUSH(val_string(result));
+                        goto method_call_done;
+                    }
+                }
+#endif
                         PUSH(val_string(result));
                         goto method_read_done;
                     }
@@ -7192,19 +7218,19 @@ private:
             PUSH(VAL_NONE);
         } DISPATCH();
         
-        //  Advanced BATCH READ - Count lines at NATIVE SPEED! 
+        // Advanced BATCH READ with platform optimization
         DO_READ_MILLION_LINES: {
             ObjString* filename = as_string(POP());
-            
-            int fd = open(filename->chars, O_RDONLY);
             int64_t line_count = 0;
             
+#if MMAP_SUPPORTED
+            int fd = open(filename->chars, O_RDONLY);
             if (fd >= 0) {
                 struct stat st;
                 fstat(fd, &st);
                 size_t size = st.st_size;
                 
-                //  MMAP for ultra-fast reading!
+                // Unix: MMAP for ultra-fast reading
                 char* data = (char*)mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (data != MAP_FAILED) {
                     madvise(data, size, MADV_SEQUENTIAL);
@@ -7218,6 +7244,25 @@ private:
                 }
                 close(fd);
             }
+#else
+            // Windows: Use standard file I/O
+            FILE* f = fopen(filename->chars, "rb");
+            if (f) {
+                fseek(f, 0, SEEK_END);
+                long size = ftell(f);
+                fseek(f, 0, SEEK_SET);
+                
+                char* buffer = (char*)malloc(size);
+                if (buffer) {
+                    fread(buffer, 1, size, f);
+                    for (long i = 0; i < size; i++) {
+                        if (buffer[i] == '\n') line_count++;
+                    }
+                    free(buffer);
+                }
+                fclose(f);
+            }
+#endif
             
             PUSH(val_int(line_count));
         } DISPATCH();
