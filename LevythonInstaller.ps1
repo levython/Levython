@@ -9,7 +9,7 @@
     - Installs VS Code extension
     - Creates file associations
 .NOTES
-    Version: 1.0.1
+    Version: 1.1.0
     Author: Levython Authors
 #>
 
@@ -22,7 +22,7 @@ Add-Type -AssemblyName PresentationFramework
 # CONFIGURATION
 # ============================================================================
 $script:AppName = "Levython"
-$script:AppVersion = "1.0.1"
+$script:AppVersion = "1.1.0"
 $script:InstallDir = "$env:ProgramFiles\Levython"
 $script:SourceDir = $PSScriptRoot
 $script:LogFile = "$env:TEMP\levython-install.log"
