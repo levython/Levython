@@ -1,0 +1,93 @@
+# ============================================
+# Levython OOP Inheritance Example
+# ============================================
+# This example demonstrates:
+# - Class inheritance (is a)
+# - Method overriding
+# - Parent class methods
+# - Polymorphism
+
+say("=== Inheritance in Levython ===")
+say("")
+
+# Base class
+class Animal {
+    init(name, species) {
+        self.name <- name
+        self.species <- species
+    }
+    
+    act speak() {
+        say(self.name + " makes a sound")
+    }
+    
+    act describe() {
+        -> self.name + " is a " + self.species
+    }
+}
+
+# Derived class - inherits from Animal
+class Dog is a Animal {
+    init(name, breed) {
+        self.name <- name
+        self.species <- "dog"
+        self.breed <- breed
+    }
+    
+    # Override parent method
+    act speak() {
+        say(self.name + " says: Woof woof!")
+    }
+    
+    # New method specific to Dog
+    act fetch() {
+        say(self.name + " fetches the ball!")
+    }
+}
+
+# Another derived class
+class Cat is a Animal {
+    init(name, indoor) {
+        self.name <- name
+        self.species <- "cat"
+        self.is_indoor <- indoor
+    }
+    
+    # Override parent method  
+    act speak() {
+        say(self.name + " says: Meow!")
+    }
+    
+    # New method specific to Cat
+    act scratch() {
+        say(self.name + " scratches the furniture!")
+    }
+}
+
+# Create instances
+say("Creating animals...")
+generic <- Animal("Generic", "unknown")
+dog <- Dog("Buddy", "Golden Retriever")
+cat <- Cat("Whiskers", yes)
+
+say("")
+say("=== Calling speak() - Polymorphism ===")
+generic.speak()
+dog.speak()
+cat.speak()
+
+say("")
+say("=== Inherited method describe() ===")
+say(generic.describe())
+say(dog.describe())
+say(cat.describe())
+
+say("")
+say("=== Class-specific methods ===")
+dog.fetch()
+cat.scratch()
+
+say("")
+say("=== Accessing properties ===")
+say("Dog breed: " + dog.breed)
+say("Cat is indoor: " + str(cat.is_indoor))

@@ -1,0 +1,69 @@
+# ==============================================================================
+# 10_file_io.levy - File Input/Output
+# ==============================================================================
+# Levython provides simple file operations:
+#   - write_file(path, content) - Write to a file
+#   - read_file(path) - Read from a file
+#   - file_exists(path) - Check if file exists
+# ==============================================================================
+
+say("=== File Writing ===")
+
+# Write a simple text file
+filename <- "test_output.txt"
+content <- "Hello from Levython!\nThis is line 2.\nThis is line 3."
+
+write_file(filename, content)
+say("Written to: " + filename)
+
+say("")
+say("=== File Reading ===")
+
+# Read the file back
+data <- read_file(filename)
+say("Contents of " + filename + ":")
+say("---")
+say(data)
+say("---")
+
+say("")
+say("=== Check File Exists ===")
+
+if file_exists(filename) {
+    say(filename + " exists!")
+}
+
+if file_exists("nonexistent.txt") {
+    say("This won't print")
+} else {
+    say("nonexistent.txt does not exist")
+}
+
+say("")
+say("=== Writing Data Report ===")
+
+# Create a report file
+report <- "=== Data Report ===\n"
+
+scores <- [95, 87, 92, 78, 88]
+total <- 0
+
+for score in scores {
+    report <- report + "Score: " + str(score) + "\n"
+    total <- total + score
+}
+
+avg <- total / len(scores)
+report <- report + "\nTotal: " + str(total) + "\n"
+report <- report + "Average: " + str(avg) + "\n"
+
+write_file("report.txt", report)
+say("Report written to report.txt")
+say("")
+say("Report contents:")
+say(read_file("report.txt"))
+
+say("")
+say("=== Cleanup ===")
+say("Created files: test_output.txt, report.txt")
+say("You can delete them manually after reviewing.")
