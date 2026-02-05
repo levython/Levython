@@ -68,13 +68,126 @@
 #include <utility>
 #include <unordered_map>
 #include <cstdint>
-#include <sys/mman.h>  // For mmap (executable memory)
-#include <sys/stat.h>  // For fstat
-#include <fcntl.h>     // For open()
-#include <unistd.h>    // For close()
 #include <cstring>     // For memcpy
 
+// Platform-specific headers
+#ifdef _WIN32
+    #define WIN32_LEAN_AND_MEAN
+    #include <windows.h>
+    #include <io.h>
+    #include <fcntl.h>  // For file constants
+    #include <sys/stat.h>
+    #define fileno _fileno
+    #define fstat _fstat64
+    #define stat _stat64
+    struct _stat64;
+    #define open _open
+    #define close _close
+    #define O_RDONLY _O_RDONLY
+    #define O_WRONLY _O_WRONLY
+    #define O_CREAT _O_CREAT
+    #define O_TRUNC _O_TRUNC
+    #define MAP_FAILED NULL
+    #define MAP_PRIVATE 0
+    #define MAP_ANONYMOUS 0
+    #define MAP_JIT 0
+    #define PROT_READ PAGE_READONLY
+    #define PROT_WRITE PAGE_READWRITE
+    #define PROT_EXEC PAGE_EXECUTE
+    #define MADV_SEQUENTIAL 0
+#else
+    #include <sys/mman.h>  // For mmap (executable memory)
+    #include <sys/stat.h>  // For fstat
+    #include <fcntl.h>     // For open()
+    #include <unistd.h>    // For close()
+#endif
+
+// Fix Windows macro conflicts with Levython language tokens
+#ifdef _WIN32
+    #ifdef TRUE
+        #undef TRUE
+    #endif
+    #ifdef FALSE
+        #undef FALSE
+    #endif
+    #ifdef NONE
+        #undef NONE
+    #endif
+    #ifdef IN
+        #undef IN
+    #endif
+    #ifdef OUT
+        #undef OUT
+    #endif
+    // Fix stream operation conflicts
+    #ifdef open
+        #undef open
+    #endif
+    #ifdef close
+        #undef close
+    #endif
+#endif
+
 namespace fs = std::filesystem;
+
+/* ===========================================================================
+ * CROSS-PLATFORM COMPATIBILITY LAYER
+ * ===========================================================================
+ * Platform-specific implementations for Windows, macOS, and Linux
+ */
+
+// Cross-platform memory mapping functions
+#ifdef _WIN32
+    inline void* platform_mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
+        // For anonymous memory (JIT code), use VirtualAlloc
+        if (fd == -1) {
+            DWORD flProtect = PAGE_EXECUTE_READWRITE; // RWX for JIT
+            void* ptr = VirtualAlloc(addr, length, MEM_COMMIT | MEM_RESERVE, flProtect);
+            return ptr ? ptr : MAP_FAILED;
+        }
+        
+        // For file mappings
+        DWORD flProtect = PAGE_EXECUTE_READWRITE;
+        HANDLE hFile = (HANDLE)_get_osfhandle(fd);
+        
+        HANDLE hMapFile = CreateFileMapping(hFile, NULL, flProtect, 0, (DWORD)length, NULL);
+        if (!hMapFile) return MAP_FAILED;
+        
+        DWORD dwDesiredAccess = FILE_MAP_ALL_ACCESS | FILE_MAP_EXECUTE;
+        void* ptr = MapViewOfFile(hMapFile, dwDesiredAccess, 0, (DWORD)offset, length);
+        CloseHandle(hMapFile);
+        
+        return ptr ? ptr : MAP_FAILED;
+    }
+
+    inline int platform_munmap(void* addr, size_t length) {
+        // Try VirtualFree first (for VirtualAlloc'd memory)
+        if (VirtualFree(addr, 0, MEM_RELEASE)) return 0;
+        // Fall back to UnmapViewOfFile (for MapViewOfFile'd memory)
+        return UnmapViewOfFile(addr) ? 0 : -1;
+    }
+
+    inline int platform_madvise(void* addr, size_t length, int advice) {
+        // Windows equivalent of madvise
+        if (advice == MADV_SEQUENTIAL) {
+            // Prefetch hint for sequential access
+            return 0; // No direct equivalent, but not critical
+        }
+        return 0;
+    }
+#else
+    inline void* platform_mmap(void* addr, size_t length, int prot, int flags, int fd, off_t offset) {
+        return mmap(addr, length, prot, flags, fd, offset);
+    }
+
+    inline int platform_munmap(void* addr, size_t length) {
+        return munmap(addr, length);
+    }
+
+    inline int platform_madvise(void* addr, size_t length, int advice) {
+        return madvise(addr, length, advice);
+    }
+#endif
 
 /* ===========================================================================
  * CONFIGURATION
@@ -193,6 +306,35 @@ struct ObjRange : Obj {
     static ObjRange* create(int64_t a, int64_t b, int64_t c);
 };
 
+// Forward declarations for OOP
+struct ObjClass;
+struct ObjInstance;
+
+/**
+ * Class object containing methods and parent reference
+ * Supports single inheritance and method lookup
+ */
+struct ObjClass : Obj {
+    ObjString* name;
+    ObjClass* parent;  // Parent class for inheritance (nullable)
+    std::unordered_map<std::string, uint64_t> methods;  // Method name -> ObjFunc
+    uint8_t arity;  // Number of init parameters
+    
+    static ObjClass* create(const char* name);
+    uint64_t find_method(const std::string& name) const;
+};
+
+/**
+ * Instance object with attribute storage
+ * Points to its class for method lookup
+ */
+struct ObjInstance : Obj {
+    ObjClass* klass;  // The class this is an instance of
+    std::unordered_map<std::string, uint64_t> fields;  // Instance attributes
+    
+    static ObjInstance* create(ObjClass* klass);
+};
+
 // ============================================================================
 // ADVANCED JIT COMPILER: x86-64 NATIVE CODE GENERATION
 // ============================================================================
@@ -247,7 +389,7 @@ public:
         
         CodeBuffer() : size(0), capacity(4096) {
             // Allocate executable memory (RWX) for JIT code
-            code = (uint8_t*)mmap(nullptr, capacity, 
+            code = (uint8_t*)platform_mmap(nullptr, capacity, 
                 PROT_READ | PROT_WRITE | PROT_EXEC,
                 MAP_PRIVATE | MAP_ANONYMOUS | MAP_JIT, -1, 0);
             if (code == MAP_FAILED) {
@@ -257,7 +399,7 @@ public:
         }
         
         ~CodeBuffer() {
-            if (code) munmap(code, capacity);
+            if (code) platform_munmap(code, capacity);
         }
         
         void emit(uint8_t byte) {
@@ -1148,8 +1290,15 @@ static int64_t native_collatz_length(int64_t n) {
     return steps;
 }
 
-// Global JIT compiler instance
-static JITCompiler g_jit;
+// Global JIT compiler instance with lazy initialization
+static JITCompiler* g_jit_ptr = nullptr;
+static JITCompiler& get_jit() {
+    if (!g_jit_ptr) {
+        g_jit_ptr = new JITCompiler();
+    }
+    return *g_jit_ptr;
+}
+#define g_jit get_jit()
 
 // JIT-compiled function cache
 struct JITCache {
@@ -1260,6 +1409,37 @@ ObjRange* ObjRange::create(int64_t a, int64_t b, int64_t c) {
 }
 
 // ============================================================================
+// OOP OBJECT CREATION FUNCTIONS
+// ============================================================================
+ObjClass* ObjClass::create(const char* name) {
+    ObjClass* c = new ObjClass();
+    c->type = ObjType::CLASS;
+    c->marked = false;
+    c->next = nullptr;
+    c->name = g_strings.intern(name, strlen(name));
+    c->parent = nullptr;
+    c->arity = 0;
+    return c;
+}
+
+uint64_t ObjClass::find_method(const std::string& name) const {
+    auto it = methods.find(name);
+    if (it != methods.end()) return it->second;
+    // Check parent class
+    if (parent) return parent->find_method(name);
+    return VAL_NONE;
+}
+
+ObjInstance* ObjInstance::create(ObjClass* klass) {
+    ObjInstance* inst = new ObjInstance();
+    inst->type = ObjType::INSTANCE;
+    inst->marked = false;
+    inst->next = nullptr;
+    inst->klass = klass;
+    return inst;
+}
+
+// ============================================================================
 // FAST VALUE OPERATIONS (all inline for speed)
 // ============================================================================
 // Value encoding/decoding
@@ -1291,7 +1471,15 @@ inline ObjString* as_string(uint64_t v) { return (ObjString*)as_obj(v); }
 inline ObjFunc* as_func(uint64_t v) { return (ObjFunc*)as_obj(v); }
 inline ObjList* as_list(uint64_t v) { return (ObjList*)as_obj(v); }
 inline ObjRange* as_range(uint64_t v) { return (ObjRange*)as_obj(v); }
+inline ObjClass* as_class(uint64_t v) { return (ObjClass*)as_obj(v); }
+inline ObjInstance* as_instance(uint64_t v) { return (ObjInstance*)as_obj(v); }
 inline ObjType obj_type(uint64_t v) { return as_obj(v)->type; }
+
+// OOP value helpers
+inline uint64_t val_class(ObjClass* c) { return val_obj((Obj*)c); }
+inline uint64_t val_instance(ObjInstance* i) { return val_obj((Obj*)i); }
+inline bool is_class(uint64_t v) { return is_obj(v) && obj_type(v) == ObjType::CLASS; }
+inline bool is_instance(uint64_t v) { return is_obj(v) && obj_type(v) == ObjType::INSTANCE; }
 
 // Value equality comparison
 inline bool values_equal(uint64_t a, uint64_t b) {
@@ -1455,6 +1643,13 @@ enum class OpCode : uint8_t {
     OP_FILE_OPEN, OP_FILE_READ, OP_FILE_WRITE, OP_FILE_CLOSE,
     OP_BUILTIN_WRITE_FILE, OP_BUILTIN_READ_FILE, OP_BUILTIN_FILE_EXISTS,
     OP_METHOD_CALL, OP_GET_PROPERTY, OP_BUILD_MAP,
+    // OOP operations
+    OP_CLASS_DEF,       // Define a class: OP_CLASS_DEF <name_idx> <parent_idx> <method_count>
+    OP_NEW_INSTANCE,    // Create instance: OP_NEW_INSTANCE (pops class, pushes instance)
+    OP_SET_PROPERTY,    // Set property: OP_SET_PROPERTY <name_idx> (pops value, peeks instance)
+    OP_GET_SELF,        // Push 'self' onto stack
+    OP_INVOKE_METHOD,   // Optimized method call: OP_INVOKE_METHOD <name_idx> <argc>
+    OP_SUPER_INVOKE,    // Call parent method: OP_SUPER_INVOKE <name_idx> <argc>
     // Batch file operations
     OP_WRITE_MILLION_LINES, OP_READ_MILLION_LINES,
     // Data structure and string operations
@@ -1532,33 +1727,8 @@ enum class ObjectType {
     INTEGER, FLOAT, STRING, BOOLEAN, NONE, LIST, MAP, FUNCTION, CLASS, INSTANCE, FILE, RANGE
 };
 
-// Environment Definition
-class Environment {
-public:
-    std::map<std::string, Value> variables;
-    std::shared_ptr<Environment> parent;
-
-    
-
-    Environment() : parent(nullptr) {}
-    explicit Environment(std::shared_ptr<Environment> p) : parent(std::move(p)) {}
-
-    Environment(const Environment& other) : parent(other.parent), variables(other.variables) {}
-    Environment& operator=(const Environment& other) {
-        if (this != &other) {
-            parent = other.parent;
-            variables = other.variables;
-        }
-        return *this;
-    }
-
-    void define(const std::string& name, Value value);
-    Value get(const std::string& name);
-    void assign(const std::string& name, Value value);
-};
-
 // ASTNode Definition
-enum class TokenType {
+enum class TokType {
     IDENTIFIER, NUMBER, STRING, TRUE, FALSE, NONE,
     SAY, ASK, ACT, CLASS, IS_A, INIT, TRY, CATCH, THROW,
     IF, ELSE, WHILE, FOR, IN, REPEAT, IMPORT, RETURN_TOKEN,
@@ -1573,9 +1743,13 @@ enum class TokenType {
 };
 
 struct Token {
-    TokenType type;
+    TokType type;
     std::string lexeme;
     size_t line;
+    
+    Token() = default;
+    Token(TokType t, const std::string& lex, size_t ln) 
+        : type(t), lexeme(lex), line(ln) {}
 };
 
 enum class NodeType {
@@ -1765,6 +1939,29 @@ public:
     }
 };
 
+// Environment Definition (placed after Value for complete type)
+class Environment {
+public:
+    std::map<std::string, Value> variables;
+    std::shared_ptr<Environment> parent;
+
+    Environment() : parent(nullptr) {}
+    explicit Environment(std::shared_ptr<Environment> p) : parent(std::move(p)) {}
+
+    Environment(const Environment& other) : parent(other.parent), variables(other.variables) {}
+    Environment& operator=(const Environment& other) {
+        if (this != &other) {
+            parent = other.parent;
+            variables = other.variables;
+        }
+        return *this;
+    }
+
+    void define(const std::string& name, Value value);
+    Value get(const std::string& name);
+    void assign(const std::string& name, Value value);
+};
+
 // ============================================================================
 // BYTECODE CHUNK - Storage for compiled bytecode
 // ============================================================================
@@ -1814,35 +2011,35 @@ class Lexer {
     std::string source;
     size_t pos;
     size_t line;
-    std::map<std::string, TokenType> keywords;
+    std::map<std::string, TokType> keywords;
 
 public:
     Lexer(const std::string& src) : source(src), pos(0), line(1) {
-        keywords["say"] = TokenType::SAY;
-        keywords["act"] = TokenType::ACT;
-        keywords["class"] = TokenType::CLASS;
-        keywords["init"] = TokenType::INIT;
-        keywords["try"] = TokenType::TRY;
-        keywords["catch"] = TokenType::CATCH;
-        keywords["throw"] = TokenType::THROW;
-        keywords["if"] = TokenType::IF;
-        keywords["else"] = TokenType::ELSE;
-        keywords["while"] = TokenType::WHILE;
-        keywords["for"] = TokenType::FOR;
-        keywords["in"] = TokenType::IN;
-        keywords["repeat"] = TokenType::REPEAT;
-        keywords["import"] = TokenType::IMPORT;
-        keywords["return"] = TokenType::RETURN_TOKEN;
-        keywords["break"] = TokenType::BREAK;      // Loop control
-        keywords["continue"] = TokenType::CONTINUE; // Loop control
-        keywords["yes"] = TokenType::TRUE;
-        keywords["no"] = TokenType::FALSE;
-        keywords["true"] = TokenType::TRUE;        // Python-style booleans
-        keywords["false"] = TokenType::FALSE;      // Python-style booleans
-        keywords["none"] = TokenType::NONE;
-        keywords["and"] = TokenType::AND;
-        keywords["or"] = TokenType::OR;
-        keywords["not"] = TokenType::NOT;
+        keywords["say"] = TokType::SAY;
+        keywords["act"] = TokType::ACT;
+        keywords["class"] = TokType::CLASS;
+        keywords["init"] = TokType::INIT;
+        keywords["try"] = TokType::TRY;
+        keywords["catch"] = TokType::CATCH;
+        keywords["throw"] = TokType::THROW;
+        keywords["if"] = TokType::IF;
+        keywords["else"] = TokType::ELSE;
+        keywords["while"] = TokType::WHILE;
+        keywords["for"] = TokType::FOR;
+        keywords["in"] = TokType::IN;
+        keywords["repeat"] = TokType::REPEAT;
+        keywords["import"] = TokType::IMPORT;
+        keywords["return"] = TokType::RETURN_TOKEN;
+        keywords["break"] = TokType::BREAK;      // Loop control
+        keywords["continue"] = TokType::CONTINUE; // Loop control
+        keywords["yes"] = TokType::TRUE;
+        keywords["no"] = TokType::FALSE;
+        keywords["true"] = TokType::TRUE;        // Python-style booleans
+        keywords["false"] = TokType::FALSE;      // Python-style booleans
+        keywords["none"] = TokType::NONE;
+        keywords["and"] = TokType::AND;
+        keywords["or"] = TokType::OR;
+        keywords["not"] = TokType::NOT;
     }
 
     std::vector<Token> tokenize() {
@@ -1872,47 +2069,47 @@ public:
             }
             if (pos + 1 < source.size()) {
                 std::string op2 = source.substr(pos, 2);
-                if (op2 == "==") { tokens.push_back({TokenType::EQ, "==", line}); pos += 2; continue; }
-                if (op2 == "!=") { tokens.push_back({TokenType::NE, "!=", line}); pos += 2; continue; }
-                if (op2 == "<=") { tokens.push_back({TokenType::LE, "<=", line}); pos += 2; continue; }
-                if (op2 == ">=") { tokens.push_back({TokenType::GE, ">=", line}); pos += 2; continue; }
-                if (op2 == "<-") { tokens.push_back({TokenType::ASSIGN, "<-", line}); pos += 2; continue; }
-                if (op2 == "->") { tokens.push_back({TokenType::RETURN_TOKEN, "->", line}); pos += 2; continue; }
+                if (op2 == "==") { tokens.push_back({TokType::EQ, "==", line}); pos += 2; continue; }
+                if (op2 == "!=") { tokens.push_back({TokType::NE, "!=", line}); pos += 2; continue; }
+                if (op2 == "<=") { tokens.push_back({TokType::LE, "<=", line}); pos += 2; continue; }
+                if (op2 == ">=") { tokens.push_back({TokType::GE, ">=", line}); pos += 2; continue; }
+                if (op2 == "<-") { tokens.push_back({TokType::ASSIGN, "<-", line}); pos += 2; continue; }
+                if (op2 == "->") { tokens.push_back({TokType::RETURN_TOKEN, "->", line}); pos += 2; continue; }
                 // Compound assignment operators
-                if (op2 == "+=") { tokens.push_back({TokenType::PLUS_ASSIGN, "+=", line}); pos += 2; continue; }
-                if (op2 == "-=") { tokens.push_back({TokenType::MINUS_ASSIGN, "-=", line}); pos += 2; continue; }
-                if (op2 == "*=") { tokens.push_back({TokenType::MUL_ASSIGN, "*=", line}); pos += 2; continue; }
-                if (op2 == "/=") { tokens.push_back({TokenType::DIV_ASSIGN, "/=", line}); pos += 2; continue; }
+                if (op2 == "+=") { tokens.push_back({TokType::PLUS_ASSIGN, "+=", line}); pos += 2; continue; }
+                if (op2 == "-=") { tokens.push_back({TokType::MINUS_ASSIGN, "-=", line}); pos += 2; continue; }
+                if (op2 == "*=") { tokens.push_back({TokType::MUL_ASSIGN, "*=", line}); pos += 2; continue; }
+                if (op2 == "/=") { tokens.push_back({TokType::DIV_ASSIGN, "/=", line}); pos += 2; continue; }
             }
             switch (c) {
-                case '+': tokens.push_back({TokenType::PLUS, "+", line}); ++pos; break;
-                case '-': tokens.push_back({TokenType::MINUS, "-", line}); ++pos; break;
-                case '*': tokens.push_back({TokenType::MULTIPLY, "*", line}); ++pos; break;
-                case '/': tokens.push_back({TokenType::DIVIDE, "/", line}); ++pos; break;
-                case '%': tokens.push_back({TokenType::MOD, "%", line}); ++pos; break;
-                case '^': tokens.push_back({TokenType::POWER, "^", line}); ++pos; break;
-                case '<': tokens.push_back({TokenType::LT, "<", line}); ++pos; break;
-                case '>': tokens.push_back({TokenType::GT, ">", line}); ++pos; break;
-                case '&': tokens.push_back({TokenType::AND, "&", line}); ++pos; break;
-                case '|': tokens.push_back({TokenType::OR, "|", line}); ++pos; break;
-                case '!': tokens.push_back({TokenType::NOT, "!", line}); ++pos; break;
-                case '(': tokens.push_back({TokenType::LPAREN, "(", line}); ++pos; break;
-                case ')': tokens.push_back({TokenType::RPAREN, ")", line}); ++pos; break;
-                case '[': tokens.push_back({TokenType::LBRACKET, "[", line}); ++pos; break;
-                case ']': tokens.push_back({TokenType::RBRACKET, "]", line}); ++pos; break;
-                case '{': tokens.push_back({TokenType::LBRACE, "{", line}); ++pos; break;
-                case '}': tokens.push_back({TokenType::RBRACE, "}", line}); ++pos; break;
-                case ':': tokens.push_back({TokenType::COLON, ":", line}); ++pos; break;
-                case '.': tokens.push_back({TokenType::DOT, ".", line}); ++pos; break;
-                case ',': tokens.push_back({TokenType::COMMA, ",", line}); ++pos; break;
-                case ';': tokens.push_back({TokenType::SEMICOLON, ";", line}); ++pos; break;
-                case '?': tokens.push_back({TokenType::QUESTION, "?", line}); ++pos; break;  // Ternary operator
+                case '+': tokens.push_back({TokType::PLUS, "+", line}); ++pos; break;
+                case '-': tokens.push_back({TokType::MINUS, "-", line}); ++pos; break;
+                case '*': tokens.push_back({TokType::MULTIPLY, "*", line}); ++pos; break;
+                case '/': tokens.push_back({TokType::DIVIDE, "/", line}); ++pos; break;
+                case '%': tokens.push_back({TokType::MOD, "%", line}); ++pos; break;
+                case '^': tokens.push_back({TokType::POWER, "^", line}); ++pos; break;
+                case '<': tokens.push_back({TokType::LT, "<", line}); ++pos; break;
+                case '>': tokens.push_back({TokType::GT, ">", line}); ++pos; break;
+                case '&': tokens.push_back({TokType::AND, "&", line}); ++pos; break;
+                case '|': tokens.push_back({TokType::OR, "|", line}); ++pos; break;
+                case '!': tokens.push_back({TokType::NOT, "!", line}); ++pos; break;
+                case '(': tokens.push_back({TokType::LPAREN, "(", line}); ++pos; break;
+                case ')': tokens.push_back({TokType::RPAREN, ")", line}); ++pos; break;
+                case '[': tokens.push_back({TokType::LBRACKET, "[", line}); ++pos; break;
+                case ']': tokens.push_back({TokType::RBRACKET, "]", line}); ++pos; break;
+                case '{': tokens.push_back({TokType::LBRACE, "{", line}); ++pos; break;
+                case '}': tokens.push_back({TokType::RBRACE, "}", line}); ++pos; break;
+                case ':': tokens.push_back({TokType::COLON, ":", line}); ++pos; break;
+                case '.': tokens.push_back({TokType::DOT, ".", line}); ++pos; break;
+                case ',': tokens.push_back({TokType::COMMA, ",", line}); ++pos; break;
+                case ';': tokens.push_back({TokType::SEMICOLON, ";", line}); ++pos; break;
+                case '?': tokens.push_back({TokType::QUESTION, "?", line}); ++pos; break;  // Ternary operator
                 default:
-                    tokens.push_back({TokenType::UNKNOWN, std::string(1, c), line});
+                    tokens.push_back({TokType::UNKNOWN, std::string(1, c), line});
                     ++pos;
             }
         }
-        tokens.push_back({TokenType::EOF_TOKEN, "", line});
+        tokens.push_back({TokType::EOF_TOKEN, "", line});
         return tokens;
     }
 
@@ -1928,19 +2125,19 @@ private:
             if (next_pos + 1 < source.size() && source[next_pos] == 'a' &&
                 (next_pos + 1 == source.size() || !isalnum(source[next_pos + 1]))) {
                 pos = next_pos + 1;
-                return {TokenType::IS_A, "is a", line};
+                return Token(TokType::IS_A, "is a", line);
             }
         }
         auto it = keywords.find(lexeme);
-        if (it != keywords.end()) return {it->second, lexeme, line};
-        return {TokenType::IDENTIFIER, lexeme, line};
+        if (it != keywords.end()) return Token(it->second, lexeme, line);
+        return Token(TokType::IDENTIFIER, lexeme, line);
     }
 
     Token scan_number() {
     // If it's a standalone ".", treat it as DOT
     if (source[pos] == '.' && (pos + 1 >= source.size() || !isdigit(source[pos + 1]))) {
         ++pos;
-        return {TokenType::DOT, ".", line};
+        return Token(TokType::DOT, ".", line);
     }
 
     std::string lexeme;
@@ -1959,10 +2156,10 @@ private:
 
     // Fallback if number lexeme somehow failed
     if (lexeme.empty()) {
-        return {TokenType::DOT, ".", line};
+        return Token(TokType::DOT, ".", line);
     }
 
-    return {TokenType::NUMBER, lexeme, line};
+    return Token(TokType::NUMBER, lexeme, line);
 }
 
 
@@ -1988,7 +2185,7 @@ private:
             ++pos;
         }
         if (pos < source.size()) ++pos;
-        return {TokenType::STRING, lexeme, start_line};
+        return Token(TokType::STRING, lexeme, start_line);
     }
 };
 
@@ -1997,14 +2194,14 @@ class Parser {
     std::vector<Token> tokens;
     size_t pos;
 
-    Token current() const { return pos < tokens.size() ? tokens[pos] : Token{TokenType::EOF_TOKEN, "", tokens.empty() ? 0 : tokens.back().line}; }
-    Token previous() const { return pos > 0 ? tokens[pos - 1] : Token{TokenType::UNKNOWN, "", 0}; }
+    Token current() const { return pos < tokens.size() ? tokens[pos] : Token(TokType::EOF_TOKEN, "", tokens.empty() ? 0 : tokens.back().line); }
+    Token previous() const { return pos > 0 ? tokens[pos - 1] : Token(TokType::UNKNOWN, "", 0); }
     Token advance() { if (!is_at_end()) pos++; return previous(); }
-    Token peek() const { return pos + 1 < tokens.size() ? tokens[pos + 1] : Token{TokenType::EOF_TOKEN, "", tokens.back().line}; }
-    bool is_at_end() const { return current().type == TokenType::EOF_TOKEN; }
-    bool check(TokenType type) const { return !is_at_end() && current().type == type; }
-    bool match(const std::vector<TokenType>& types) {
-        for (TokenType type : types) {
+    Token peek() const { return pos + 1 < tokens.size() ? tokens[pos + 1] : Token(TokType::EOF_TOKEN, "", tokens.back().line); }
+    bool is_at_end() const { return current().type == TokType::EOF_TOKEN; }
+    bool check(TokType type) const { return !is_at_end() && current().type == type; }
+    bool match(const std::vector<TokType>& types) {
+        for (TokType type : types) {
             if (check(type)) {
                 advance();
                 return true;
@@ -2016,47 +2213,47 @@ class Parser {
     void error(const Token& token, const std::string& message) const {
         std::stringstream ss;
         ss << "[Line " << token.line << "] Error";
-        if (token.type == TokenType::EOF_TOKEN) ss << " at end";
+        if (token.type == TokType::EOF_TOKEN) ss << " at end";
         else ss << " at '" << token.lexeme << "'";
         ss << ": " << message;
         throw std::runtime_error(ss.str());
     }
 
-    Token consume(TokenType type, const std::string& message) {
+    Token consume(TokType type, const std::string& message) {
         if (check(type)) return advance();
         error(current(), message);
-        return Token{TokenType::UNKNOWN, "", current().line};
+        return Token(TokType::UNKNOWN, "", current().line);
     }
 
     std::unique_ptr<ASTNode> parse_statement() {
-        if (match({TokenType::SAY})) return parse_say_statement();
-        if (match({TokenType::IF})) return parse_if_statement();
-        if (match({TokenType::WHILE})) return parse_while_statement();
-        if (match({TokenType::FOR})) return parse_for_statement();
-        if (match({TokenType::REPEAT})) return parse_repeat_statement();
-        if (match({TokenType::RETURN_TOKEN})) return parse_return_statement();
-        if (match({TokenType::ACT})) return parse_function_definition("act");
-        if (match({TokenType::CLASS})) return parse_class_definition();
-        if (match({TokenType::IMPORT})) return parse_import_statement();
-        if (match({TokenType::TRY})) return parse_try_statement();
-        if (match({TokenType::LBRACE})) return parse_block();
+        if (match({TokType::SAY})) return parse_say_statement();
+        if (match({TokType::IF})) return parse_if_statement();
+        if (match({TokType::WHILE})) return parse_while_statement();
+        if (match({TokType::FOR})) return parse_for_statement();
+        if (match({TokType::REPEAT})) return parse_repeat_statement();
+        if (match({TokType::RETURN_TOKEN})) return parse_return_statement();
+        if (match({TokType::ACT})) return parse_function_definition("act");
+        if (match({TokType::CLASS})) return parse_class_definition();
+        if (match({TokType::IMPORT})) return parse_import_statement();
+        if (match({TokType::TRY})) return parse_try_statement();
+        if (match({TokType::LBRACE})) return parse_block();
         // Loop control: break and continue
-        if (match({TokenType::BREAK})) {
-            match({TokenType::SEMICOLON});
+        if (match({TokType::BREAK})) {
+            match({TokType::SEMICOLON});
             return std::make_unique<ASTNode>(NodeType::BREAK, previous());
         }
-        if (match({TokenType::CONTINUE})) {
-            match({TokenType::SEMICOLON});
+        if (match({TokType::CONTINUE})) {
+            match({TokType::SEMICOLON});
             return std::make_unique<ASTNode>(NodeType::CONTINUE, previous());
         }
         // Throw statement
-        if (match({TokenType::THROW})) {
+        if (match({TokType::THROW})) {
             Token keyword = previous();
             auto node = std::make_unique<ASTNode>(NodeType::THROW_STMT, keyword);
-            if (!check(TokenType::SEMICOLON) && !check(TokenType::RBRACE) && !is_at_end()) {
+            if (!check(TokType::SEMICOLON) && !check(TokType::RBRACE) && !is_at_end()) {
                 node->addChild(parse_expression());  // Optional error message
             }
-            match({TokenType::SEMICOLON});
+            match({TokType::SEMICOLON});
             return node;
         }
         return parse_expression_statement();
@@ -2064,25 +2261,25 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_block() {
         auto block_node = std::make_unique<ASTNode>(NodeType::BLOCK, previous());
-        while (!check(TokenType::RBRACE) && !is_at_end()) {
+        while (!check(TokType::RBRACE) && !is_at_end()) {
             block_node->addChild(parse_declaration_or_statement());
         }
-        consume(TokenType::RBRACE, "Expect '}' after block.");
+        consume(TokType::RBRACE, "Expect '}' after block.");
         return block_node;
     }
 
     std::unique_ptr<ASTNode> parse_declaration_or_statement() {
-        if (match({TokenType::ACT})) return parse_function_definition("act");
-        if (match({TokenType::CLASS})) return parse_class_definition();
+        if (match({TokType::ACT})) return parse_function_definition("act");
+        if (match({TokType::CLASS})) return parse_class_definition();
         return parse_statement();
     }
 
     std::unique_ptr<ASTNode> parse_say_statement() {
         Token keyword = previous();
-        consume(TokenType::LPAREN, "Expect '(' after 'say'.");
+        consume(TokType::LPAREN, "Expect '(' after 'say'.");
         auto value = parse_expression();
-        consume(TokenType::RPAREN, "Expect ')' after value.");
-        match({TokenType::SEMICOLON});
+        consume(TokType::RPAREN, "Expect ')' after value.");
+        match({TokType::SEMICOLON});
         auto node = std::make_unique<ASTNode>(NodeType::SAY, keyword);
         node->addChild(std::move(value));
         return node;
@@ -2093,7 +2290,7 @@ class Parser {
         auto condition = parse_expression();
         auto then_branch = parse_statement_or_block();
         std::unique_ptr<ASTNode> else_branch = nullptr;
-        if (match({TokenType::ELSE})) {
+        if (match({TokType::ELSE})) {
             else_branch = parse_statement_or_block();
         }
         auto node = std::make_unique<ASTNode>(NodeType::IF, keyword);
@@ -2115,8 +2312,8 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_for_statement() {
         Token keyword = previous();
-        Token loop_var_token = consume(TokenType::IDENTIFIER, "Expect loop variable name.");
-        consume(TokenType::IN, "Expect 'in' after loop variable.");
+        Token loop_var_token = consume(TokType::IDENTIFIER, "Expect loop variable name.");
+        consume(TokType::IN, "Expect 'in' after loop variable.");
         auto iterable = parse_expression();
         auto body = parse_statement_or_block();
         auto node = std::make_unique<ASTNode>(NodeType::FOR, keyword);
@@ -2139,10 +2336,10 @@ class Parser {
     std::unique_ptr<ASTNode> parse_return_statement() {
         Token keyword = previous();
         std::unique_ptr<ASTNode> value = nullptr;
-        if (!check(TokenType::SEMICOLON) && !check(TokenType::RBRACE)) {
+        if (!check(TokType::SEMICOLON) && !check(TokType::RBRACE)) {
             value = parse_expression();
         }
-        match({TokenType::SEMICOLON});
+        match({TokType::SEMICOLON});
         auto node = std::make_unique<ASTNode>(NodeType::RETURN, keyword);
         if (value) node->addChild(std::move(value));
         return node;
@@ -2150,52 +2347,52 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_function_definition(const std::string& kind) {
         Token keyword = previous();
-        Token name = consume(TokenType::IDENTIFIER, "Expect function name.");
+        Token name = consume(TokType::IDENTIFIER, "Expect function name.");
         auto node = std::make_unique<ASTNode>(NodeType::FUNCTION, name);
         node->value = name.lexeme;
-        consume(TokenType::LPAREN, "Expect '(' after function name.");
-        if (!check(TokenType::RPAREN)) {
+        consume(TokType::LPAREN, "Expect '(' after function name.");
+        if (!check(TokType::RPAREN)) {
             do {
-                node->params.push_back(consume(TokenType::IDENTIFIER, "Expect parameter name.").lexeme);
-            } while (match({TokenType::COMMA}));
+                node->params.push_back(consume(TokType::IDENTIFIER, "Expect parameter name.").lexeme);
+            } while (match({TokType::COMMA}));
         }
-        consume(TokenType::RPAREN, "Expect ')' after parameters.");
-        consume(TokenType::LBRACE, "Expect '{' before function body.");
+        consume(TokType::RPAREN, "Expect ')' after parameters.");
+        consume(TokType::LBRACE, "Expect '{' before function body.");
         node->addChild(parse_block());
         return node;
     }
 
     std::unique_ptr<ASTNode> parse_class_definition() {
         Token keyword = previous();
-        Token name = consume(TokenType::IDENTIFIER, "Expect class name.");
+        Token name = consume(TokType::IDENTIFIER, "Expect class name.");
         auto node = std::make_unique<ASTNode>(NodeType::CLASS, name);
         node->class_name = name.lexeme;
 
-        if (match({TokenType::IS_A})) {
-            Token parent_name = consume(TokenType::IDENTIFIER, "Expect parent class name after 'is a'.");
+        if (match({TokType::IS_A})) {
+            Token parent_name = consume(TokType::IDENTIFIER, "Expect parent class name after 'is a'.");
             node->addChild(std::make_unique<ASTNode>(NodeType::VARIABLE, parent_name));
             node->children[0]->value = parent_name.lexeme;
         }
 
-        consume(TokenType::LBRACE, "Expect '{' before class body.");
+        consume(TokType::LBRACE, "Expect '{' before class body.");
 
-        while (!check(TokenType::RBRACE) && !is_at_end()) {
-            if (match({TokenType::ACT})) {
+        while (!check(TokType::RBRACE) && !is_at_end()) {
+            if (match({TokType::ACT})) {
                 auto method = parse_function_definition("act");
                 node->addChild(std::move(method));
-            } else if (match({TokenType::INIT})) {
+            } else if (match({TokType::INIT})) {
                 Token initToken = previous();
-                auto initNode = std::make_unique<ASTNode>(NodeType::FUNCTION, Token{TokenType::IDENTIFIER, "init", initToken.line});
+                auto initNode = std::make_unique<ASTNode>(NodeType::FUNCTION, Token(TokType::IDENTIFIER, "init", initToken.line));
                 initNode->value = "init";
 
-                consume(TokenType::LPAREN, "Expect '(' after init.");
-                if (!check(TokenType::RPAREN)) {
+                consume(TokType::LPAREN, "Expect '(' after init.");
+                if (!check(TokType::RPAREN)) {
                     do {
-                        initNode->params.push_back(consume(TokenType::IDENTIFIER, "Expect parameter name.").lexeme);
-                    } while (match({TokenType::COMMA}));
+                        initNode->params.push_back(consume(TokType::IDENTIFIER, "Expect parameter name.").lexeme);
+                    } while (match({TokType::COMMA}));
                 }
-                consume(TokenType::RPAREN, "Expect ')' after parameters.");
-                consume(TokenType::LBRACE, "Expect '{' before init body.");
+                consume(TokType::RPAREN, "Expect ')' after parameters.");
+                consume(TokType::LBRACE, "Expect '{' before init body.");
                 initNode->addChild(parse_block());
                 node->addChild(std::move(initNode));
             } else {
@@ -2203,14 +2400,14 @@ class Parser {
             }
         }
 
-        consume(TokenType::RBRACE, "Expect '}' after class body.");
+        consume(TokType::RBRACE, "Expect '}' after class body.");
         return node;
     }
 
     std::unique_ptr<ASTNode> parse_import_statement() {
         Token keyword = previous();
-        Token module_name = consume(TokenType::IDENTIFIER, "Expect module name after 'import'.");
-        match({TokenType::SEMICOLON});
+        Token module_name = consume(TokType::IDENTIFIER, "Expect module name after 'import'.");
+        match({TokType::SEMICOLON});
         auto node = std::make_unique<ASTNode>(NodeType::IMPORT, keyword);
         node->value = module_name.lexeme;
         return node;
@@ -2219,7 +2416,7 @@ class Parser {
     std::unique_ptr<ASTNode> parse_try_statement() {
         Token keyword = previous();
         auto try_block = parse_statement_or_block();
-        consume(TokenType::CATCH, "Expect 'catch' after try block.");
+        consume(TokType::CATCH, "Expect 'catch' after try block.");
         auto catch_block = parse_statement_or_block();
         auto node = std::make_unique<ASTNode>(NodeType::TRY, keyword);
         node->addChild(std::move(try_block));
@@ -2228,13 +2425,13 @@ class Parser {
     }
 
     std::unique_ptr<ASTNode> parse_statement_or_block() {
-        if (match({TokenType::LBRACE})) return parse_block();
+        if (match({TokType::LBRACE})) return parse_block();
         return parse_statement();
     }
 
     std::unique_ptr<ASTNode> parse_expression_statement() {
         auto expr = parse_expression();
-        match({TokenType::SEMICOLON});
+        match({TokType::SEMICOLON});
         return expr;
     }
 
@@ -2244,7 +2441,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_assignment() {
         auto expr = parse_logical_or();
-        if (match({TokenType::ASSIGN})) {
+        if (match({TokType::ASSIGN})) {
             Token equals = previous();
             auto value = parse_assignment();
             if (expr->type == NodeType::VARIABLE || expr->type == NodeType::GET_ATTR || expr->type == NodeType::INDEX) {
@@ -2257,7 +2454,7 @@ class Parser {
             error(equals, "Invalid assignment target.");
         }
         // Compound assignment operators
-        if (match({TokenType::PLUS_ASSIGN, TokenType::MINUS_ASSIGN, TokenType::MUL_ASSIGN, TokenType::DIV_ASSIGN})) {
+        if (match({TokType::PLUS_ASSIGN, TokType::MINUS_ASSIGN, TokType::MUL_ASSIGN, TokType::DIV_ASSIGN})) {
             Token op = previous();
             auto value = parse_assignment();
             if (expr->type == NodeType::VARIABLE || expr->type == NodeType::GET_ATTR || expr->type == NodeType::INDEX) {
@@ -2275,7 +2472,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_logical_or() {
         auto expr = parse_logical_and();
-        while (match({TokenType::OR})) {
+        while (match({TokType::OR})) {
             Token op = previous();
             auto right = parse_logical_and();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2289,7 +2486,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_logical_and() {
         auto expr = parse_equality();
-        while (match({TokenType::AND})) {
+        while (match({TokType::AND})) {
             Token op = previous();
             auto right = parse_equality();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2303,7 +2500,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_equality() {
         auto expr = parse_comparison();
-        while (match({TokenType::EQ, TokenType::NE})) {
+        while (match({TokType::EQ, TokType::NE})) {
             Token op = previous();
             auto right = parse_comparison();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2317,7 +2514,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_comparison() {
         auto expr = parse_term();
-        while (match({TokenType::GT, TokenType::GE, TokenType::LT, TokenType::LE})) {
+        while (match({TokType::GT, TokType::GE, TokType::LT, TokType::LE})) {
             Token op = previous();
             auto right = parse_term();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2331,7 +2528,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_term() {
         auto expr = parse_factor();
-        while (match({TokenType::PLUS, TokenType::MINUS})) {
+        while (match({TokType::PLUS, TokType::MINUS})) {
             Token op = previous();
             auto right = parse_factor();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2345,7 +2542,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_factor() {
         auto expr = parse_power();
-        while (match({TokenType::MULTIPLY, TokenType::DIVIDE, TokenType::MOD})) {
+        while (match({TokType::MULTIPLY, TokType::DIVIDE, TokType::MOD})) {
             Token op = previous();
             auto right = parse_power();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2359,7 +2556,7 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_power() {
         auto expr = parse_unary();
-        while (match({TokenType::POWER})) {
+        while (match({TokType::POWER})) {
             Token op = previous();
             auto right = parse_unary();
             auto node = std::make_unique<ASTNode>(NodeType::BINARY, op);
@@ -2372,7 +2569,7 @@ class Parser {
     }
 
     std::unique_ptr<ASTNode> parse_unary() {
-        if (match({TokenType::NOT, TokenType::MINUS})) {
+        if (match({TokType::NOT, TokType::MINUS})) {
             Token op = previous();
             auto right = parse_unary();
             auto node = std::make_unique<ASTNode>(NodeType::UNARY, op);
@@ -2387,10 +2584,10 @@ class Parser {
     auto expr = parse_primary();
 
     while (true) {
-        if (match({TokenType::DOT})) {
+        if (match({TokType::DOT})) {
             // Support method names like "init" (which is a keyword)
             Token name = current();
-            if (name.type != TokenType::IDENTIFIER && name.type != TokenType::INIT) {
+            if (name.type != TokType::IDENTIFIER && name.type != TokType::INIT) {
                 error(current(), "Expect property or method name after '.'.");
             }
             advance();
@@ -2400,22 +2597,22 @@ class Parser {
             expr = std::move(get_node);
         }
 
-        else if (match({TokenType::LPAREN})) {
+        else if (match({TokType::LPAREN})) {
             Token paren = previous();
             auto call_node = std::make_unique<ASTNode>(NodeType::CALL, paren);
             call_node->addChild(std::move(expr));
-            if (!check(TokenType::RPAREN)) {
+            if (!check(TokType::RPAREN)) {
                 do {
                     call_node->addChild(parse_expression());
-                } while (match({TokenType::COMMA}));
+                } while (match({TokType::COMMA}));
             }
-            consume(TokenType::RPAREN, "Expect ')' after arguments.");
+            consume(TokType::RPAREN, "Expect ')' after arguments.");
             expr = std::move(call_node);
         }
-        else if (match({TokenType::LBRACKET})) {
+        else if (match({TokType::LBRACKET})) {
             Token bracket = previous();
             auto index = parse_expression();
-            consume(TokenType::RBRACKET, "Expect ']' after index.");
+            consume(TokType::RBRACKET, "Expect ']' after index.");
             auto index_node = std::make_unique<ASTNode>(NodeType::INDEX, bracket);
             index_node->addChild(std::move(expr));
             index_node->addChild(std::move(index));
@@ -2433,48 +2630,48 @@ class Parser {
     std::unique_ptr<ASTNode> parse_map() {
         Token token = previous();
         auto node = std::make_unique<ASTNode>(NodeType::MAP, token);
-        if (!check(TokenType::RBRACE)) {
+        if (!check(TokType::RBRACE)) {
             do {
                 auto key = parse_expression();
-                if (key->type != NodeType::LITERAL || key->token.type != TokenType::STRING) {
+                if (key->type != NodeType::LITERAL || key->token.type != TokType::STRING) {
                     error(key->token, "Map keys must be string literals.");
                 }
-                consume(TokenType::COLON, "Expect ':' after map key.");
+                consume(TokType::COLON, "Expect ':' after map key.");
                 auto value = parse_expression();
                 node->addChild(std::move(key));
                 node->addChild(std::move(value));
-            } while (match({TokenType::COMMA}));
+            } while (match({TokType::COMMA}));
         }
-        consume(TokenType::RBRACE, "Expect '}' after map elements.");
+        consume(TokType::RBRACE, "Expect '}' after map elements.");
         return node;
     }
 
     std::unique_ptr<ASTNode> parse_primary() {
-        if (match({TokenType::FALSE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
-        if (match({TokenType::TRUE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
-        if (match({TokenType::NONE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
-        if (match({TokenType::NUMBER})) {
+        if (match({TokType::FALSE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
+        if (match({TokType::TRUE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
+        if (match({TokType::NONE})) return std::make_unique<ASTNode>(NodeType::LITERAL, previous());
+        if (match({TokType::NUMBER})) {
             auto node = std::make_unique<ASTNode>(NodeType::LITERAL, previous());
             node->value = node->token.lexeme;
             return node;
         }
-        if (match({TokenType::STRING})) {
+        if (match({TokType::STRING})) {
             auto node = std::make_unique<ASTNode>(NodeType::LITERAL, previous());
             node->value = node->token.lexeme;
             return node;
         }
-        if (match({TokenType::IDENTIFIER})) {
+        if (match({TokType::IDENTIFIER})) {
             auto node = std::make_unique<ASTNode>(NodeType::VARIABLE, previous());
             node->value = node->token.lexeme;
             return node;
         }
-        if (match({TokenType::LPAREN})) {
+        if (match({TokType::LPAREN})) {
             // Could be grouping (expr) or tuple (a, b, c)
             Token paren = previous();
             
             // Check for empty tuple ()
-            if (check(TokenType::RPAREN)) {
-                consume(TokenType::RPAREN, "Expect ')' after tuple.");
+            if (check(TokType::RPAREN)) {
+                consume(TokType::RPAREN, "Expect ')' after tuple.");
                 auto node = std::make_unique<ASTNode>(NodeType::LITERAL, paren);
                 node->value = "tuple";
                 return node;
@@ -2483,38 +2680,38 @@ class Parser {
             auto first = parse_expression();
             
             // If there's a comma, it's a tuple
-            if (match({TokenType::COMMA})) {
+            if (match({TokType::COMMA})) {
                 auto node = std::make_unique<ASTNode>(NodeType::LITERAL, paren);
                 node->value = "tuple";
                 node->addChild(std::move(first));
                 
                 // Parse remaining elements
                 do {
-                    if (check(TokenType::RPAREN)) break;  // Allow trailing comma
+                    if (check(TokType::RPAREN)) break;  // Allow trailing comma
                     node->addChild(parse_expression());
-                } while (match({TokenType::COMMA}));
+                } while (match({TokType::COMMA}));
                 
-                consume(TokenType::RPAREN, "Expect ')' after tuple elements.");
+                consume(TokType::RPAREN, "Expect ')' after tuple elements.");
                 return node;
             }
             
             // No comma - just grouping
-            consume(TokenType::RPAREN, "Expect ')' after expression.");
+            consume(TokType::RPAREN, "Expect ')' after expression.");
             return first;
         }
-        if (match({TokenType::LBRACKET})) {
+        if (match({TokType::LBRACKET})) {
             auto node = std::make_unique<ASTNode>(NodeType::LITERAL, previous());
             node->value = "list";
-            if (!check(TokenType::RBRACKET)) {
+            if (!check(TokType::RBRACKET)) {
                 do {
-                    if (check(TokenType::RBRACKET)) break;
+                    if (check(TokType::RBRACKET)) break;
                     node->addChild(parse_expression());
-                } while (match({TokenType::COMMA}));
+                } while (match({TokType::COMMA}));
             }
-            consume(TokenType::RBRACKET, "Expect ']' after list elements.");
+            consume(TokType::RBRACKET, "Expect ']' after list elements.");
             return node;
         }
-        if (match({TokenType::LBRACE})) {
+        if (match({TokType::LBRACE})) {
             return parse_map();
         }
         error(current(), "Expect expression.");
@@ -2524,25 +2721,25 @@ class Parser {
 public:
     explicit Parser(std::vector<Token> t) : tokens(std::move(t)), pos(0) {}
     std::unique_ptr<ASTNode> parse() {
-        auto program = std::make_unique<ASTNode>(NodeType::PROGRAM, Token{TokenType::UNKNOWN, "program", 0});
+        auto program = std::make_unique<ASTNode>(NodeType::PROGRAM, Token(TokType::UNKNOWN, "program", 0));
         while (!is_at_end()) {
             try {
                 program->addChild(parse_declaration_or_statement());
             } catch (const std::runtime_error& e) {
                 std::cerr << e.what() << std::endl;
                 while (!is_at_end()) {
-                    if (previous().type == TokenType::SEMICOLON) break;
+                    if (previous().type == TokType::SEMICOLON) break;
                     switch (current().type) {
-                        case TokenType::CLASS:
-                        case TokenType::ACT:
-                        case TokenType::FOR:
-                        case TokenType::IF:
-                        case TokenType::WHILE:
-                        case TokenType::REPEAT:
-                        case TokenType::SAY:
-                        case TokenType::RETURN_TOKEN:
-                        case TokenType::IMPORT:
-                        case TokenType::TRY:
+                        case TokType::CLASS:
+                        case TokType::ACT:
+                        case TokType::FOR:
+                        case TokType::IF:
+                        case TokType::WHILE:
+                        case TokType::REPEAT:
+                        case TokType::SAY:
+                        case TokType::RETURN_TOKEN:
+                        case TokType::IMPORT:
+                        case TokType::TRY:
                             goto next_statement;
                         default:
                             advance();
@@ -3119,7 +3316,7 @@ class Interpreter {
         size_t size = static_cast<size_t>(args[0].data.integer);
         void* ptr = std::malloc(size);
         if (!ptr) throw std::runtime_error("mem_alloc() failed to allocate " + std::to_string(size) + " bytes.");
-        return Value(reinterpret_cast<long>(ptr));  // Return as integer address
+        return Value(static_cast<long>(reinterpret_cast<intptr_t>(ptr)));  // Return as integer address
     }
     
     // Raw memory free
@@ -3683,7 +3880,11 @@ public:
             }
             
             std::string line;
-            if (!std::getline(std::cin, line)) break;
+            if (!std::getline(std::cin, line)) {
+                // EOF received (Ctrl+D on Unix, Ctrl+Z on Windows)
+                std::cout << std::endl;
+                break;
+            }
             
             // Handle empty line
             if (line.empty()) {
@@ -4053,7 +4254,7 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                 throw std::runtime_error("Unsupported unary operator '" + op + "'");
             }
             case NodeType::LITERAL: {
-                if (node->token.type == TokenType::NUMBER) {
+                if (node->token.type == TokType::NUMBER) {
                     try {
                         if (node->value.find('.') != std::string::npos) return Value(std::stod(node->value));
                         return Value(std::stol(node->value));
@@ -4061,10 +4262,10 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                         throw std::runtime_error("Invalid numeric literal: " + node->value);
                     }
                 }
-                if (node->token.type == TokenType::STRING) return Value(node->value);
-                if (node->token.type == TokenType::TRUE) return Value(true);
-                if (node->token.type == TokenType::FALSE) return Value(false);
-                if (node->token.type == TokenType::NONE) return Value(ObjectType::NONE);
+                if (node->token.type == TokType::STRING) return Value(node->value);
+                if (node->token.type == TokType::TRUE) return Value(true);
+                if (node->token.type == TokType::FALSE) return Value(false);
+                if (node->token.type == TokType::NONE) return Value(ObjectType::NONE);
                 if (node->value == "list") {
                     Value list_val(ObjectType::LIST);
                     list_val.data.list.reserve(node->children.size());
@@ -4627,6 +4828,21 @@ public:
         end_scope();
         return chunk;
     }
+    
+    // Compile a class method - 'self' is always slot 0
+    std::shared_ptr<Chunk> compile_method(ASTNode* node) {
+        chunk = std::make_shared<Chunk>();
+        begin_scope();
+        locals.push_back({"self", scope_depth});  // Slot 0 for 'self'
+        for (const auto& param : node->params) {
+            locals.push_back({param, scope_depth});
+        }
+        if (!node->children.empty()) compile_node(node->children[0].get());
+        emit(OpCode::OP_NONE);
+        emit(OpCode::OP_RETURN);
+        end_scope();
+        return chunk;
+    }
 
 private:
     void emit(OpCode op) { chunk->write_op(op); }
@@ -4682,7 +4898,7 @@ private:
                 }
                 break;
             case NodeType::LITERAL:
-                if (node->token.type == TokenType::NUMBER) {
+                if (node->token.type == TokType::NUMBER) {
                     std::string num = node->token.lexeme;
                     if (num.find('.') != std::string::npos) emit_constant(Value(std::stod(num)));
                     else {
@@ -4690,11 +4906,11 @@ private:
                         if (v >= 0 && v <= 255) { emit(OpCode::OP_CONST_INT); emit_byte(v); }
                         else emit_constant(Value(v));
                     }
-                } else if (node->token.type == TokenType::STRING) emit_constant(Value(node->token.lexeme));
-                else if (node->token.type == TokenType::TRUE) emit(OpCode::OP_TRUE);
-                else if (node->token.type == TokenType::FALSE) emit(OpCode::OP_FALSE);
-                else if (node->token.type == TokenType::NONE) emit(OpCode::OP_NONE);
-                else if (node->token.type == TokenType::LBRACKET) {
+                } else if (node->token.type == TokType::STRING) emit_constant(Value(node->token.lexeme));
+                else if (node->token.type == TokType::TRUE) emit(OpCode::OP_TRUE);
+                else if (node->token.type == TokType::FALSE) emit(OpCode::OP_FALSE);
+                else if (node->token.type == TokType::NONE) emit(OpCode::OP_NONE);
+                else if (node->token.type == TokType::LBRACKET) {
                     for (auto& c : node->children) compile_node(c.get());
                     emit(OpCode::OP_BUILD_LIST);
                     emit_byte(node->children.size());
@@ -4724,6 +4940,17 @@ private:
                     compile_node(node->children[0]->children[1].get());  // Index (i)
                     compile_node(node->children[1].get());               // Value
                     emit(OpCode::OP_SET_INDEX);
+                    emit(OpCode::OP_POP);
+                    break;
+                }
+                // Check if assigning to a property (obj.prop <- val)
+                if (node->children[0]->type == NodeType::GET_ATTR) {
+                    // obj.prop <- val => push obj, push val, SET_PROPERTY prop
+                    compile_node(node->children[0]->children[0].get());  // Object
+                    compile_node(node->children[1].get());               // Value
+                    size_t prop_idx = chunk->add_constant(Value(node->children[0]->value));
+                    emit(OpCode::OP_SET_PROPERTY);
+                    emit_short(prop_idx);
                     emit(OpCode::OP_POP);
                     break;
                 }
@@ -4772,8 +4999,8 @@ private:
                 // CONSTANT FOLDING: Compute at compile time if both operands are numeric literals
                 if (node->children[0]->type == NodeType::LITERAL && 
                     node->children[1]->type == NodeType::LITERAL &&
-                    node->children[0]->token.type == TokenType::NUMBER &&
-                    node->children[1]->token.type == TokenType::NUMBER &&
+                    node->children[0]->token.type == TokType::NUMBER &&
+                    node->children[1]->token.type == TokType::NUMBER &&
                     node->children[0]->token.lexeme.find('.') == std::string::npos &&
                     node->children[1]->token.lexeme.find('.') == std::string::npos) {
                     // Both are integers (no decimal point)
@@ -4782,14 +5009,14 @@ private:
                     int64_t result = 0;
                     bool folded = true;
                     switch (node->token.type) {
-                        case TokenType::PLUS: result = left + right; break;
-                        case TokenType::MINUS: result = left - right; break;
-                        case TokenType::MULTIPLY: result = left * right; break;
-                        case TokenType::DIVIDE: 
+                        case TokType::PLUS: result = left + right; break;
+                        case TokType::MINUS: result = left - right; break;
+                        case TokType::MULTIPLY: result = left * right; break;
+                        case TokType::DIVIDE: 
                             if (right == 0) folded = false;  // Don't fold div by zero - let runtime handle!
                             else result = left / right;
                             break;
-                        case TokenType::MOD:
+                        case TokType::MOD:
                             if (right == 0) folded = false;  // Don't fold mod by zero - let runtime handle!
                             else result = left % right;
                             break;
@@ -4805,28 +5032,28 @@ private:
                 compile_node(node->children[0].get());
                 compile_node(node->children[1].get());
                 switch (node->token.type) {
-                    case TokenType::PLUS: emit(OpCode::OP_ADD); break;
-                    case TokenType::MINUS: emit(OpCode::OP_SUB); break;
-                    case TokenType::MULTIPLY: emit(OpCode::OP_MUL); break;
-                    case TokenType::DIVIDE: emit(OpCode::OP_DIV); break;
-                    case TokenType::MOD: emit(OpCode::OP_MOD); break;
-                    case TokenType::POWER: emit(OpCode::OP_POW); break;
-                    case TokenType::EQ: emit(OpCode::OP_EQ); break;
-                    case TokenType::NE: emit(OpCode::OP_NE); break;
-                    case TokenType::LT: emit(OpCode::OP_LT); break;
-                    case TokenType::GT: emit(OpCode::OP_GT); break;
-                    case TokenType::LE: emit(OpCode::OP_LE); break;
-                    case TokenType::GE: emit(OpCode::OP_GE); break;
-                    case TokenType::AND: emit(OpCode::OP_AND); break;
-                    case TokenType::OR: emit(OpCode::OP_OR); break;
+                    case TokType::PLUS: emit(OpCode::OP_ADD); break;
+                    case TokType::MINUS: emit(OpCode::OP_SUB); break;
+                    case TokType::MULTIPLY: emit(OpCode::OP_MUL); break;
+                    case TokType::DIVIDE: emit(OpCode::OP_DIV); break;
+                    case TokType::MOD: emit(OpCode::OP_MOD); break;
+                    case TokType::POWER: emit(OpCode::OP_POW); break;
+                    case TokType::EQ: emit(OpCode::OP_EQ); break;
+                    case TokType::NE: emit(OpCode::OP_NE); break;
+                    case TokType::LT: emit(OpCode::OP_LT); break;
+                    case TokType::GT: emit(OpCode::OP_GT); break;
+                    case TokType::LE: emit(OpCode::OP_LE); break;
+                    case TokType::GE: emit(OpCode::OP_GE); break;
+                    case TokType::AND: emit(OpCode::OP_AND); break;
+                    case TokType::OR: emit(OpCode::OP_OR); break;
                     default: break;
                 }
                 break;
             }
             case NodeType::UNARY:
                 compile_node(node->children[0].get());
-                if (node->token.type == TokenType::MINUS) emit(OpCode::OP_NEG);
-                else if (node->token.type == TokenType::NOT) emit(OpCode::OP_NOT);
+                if (node->token.type == TokType::MINUS) emit(OpCode::OP_NEG);
+                else if (node->token.type == TokType::NOT) emit(OpCode::OP_NOT);
                 break;
             case NodeType::IF: {
                 compile_node(node->children[0].get());
@@ -4980,6 +5207,87 @@ private:
                     emit(OpCode::OP_DEFINE_GLOBAL);
                     emit_short(name_idx);  // Use 16-bit index
                 }
+                break;
+            }
+            // ============================================================================
+            // OOP: CLASS DEFINITION
+            // ============================================================================
+            case NodeType::CLASS: {
+                // Create class object
+                ObjClass* klass = ObjClass::create(node->class_name.c_str());
+                
+                // Handle inheritance (first child may be parent class reference)
+                size_t start_idx = 0;
+                if (!node->children.empty() && node->children[0] && 
+                    node->children[0]->type == NodeType::VARIABLE) {
+                    // Has parent class - we'll resolve it at runtime
+                    size_t parent_name_idx = chunk->add_constant(Value(node->children[0]->token.lexeme));
+                    start_idx = 1;
+                    // Mark that this class has a parent (will be resolved in DO_CLASS_DEF)
+                    klass->parent = (ObjClass*)(uintptr_t)parent_name_idx;  // Temporary: store index
+                }
+                
+                // Compile methods
+                for (size_t i = start_idx; i < node->children.size(); ++i) {
+                    ASTNode* method_node = node->children[i].get();
+                    if (method_node && method_node->type == NodeType::FUNCTION) {
+                        // Compile method with special handling for 'self'
+                        Compiler mc;
+                        auto mchunk = mc.compile_method(method_node);
+                        
+                        // Create a new Chunk that we own (copy the data)
+                        Chunk* owned_chunk = new Chunk();
+                        owned_chunk->code = mchunk->code;
+                        owned_chunk->constants = mchunk->constants;
+                        
+                        // Store method in class
+                        ObjFunc* mfunc = make_func(owned_chunk, method_node->value.c_str(), 
+                                                   method_node->params.size());
+                        klass->methods[method_node->value] = val_func(mfunc);
+                        
+                        // Track init arity
+                        if (method_node->value == "init") {
+                            klass->arity = method_node->params.size();
+                        }
+                    }
+                }
+                
+                // Push class constant
+                size_t class_idx = chunk->add_constant(Value(node->class_name));
+                emit(OpCode::OP_CLASS_DEF);
+                emit_short(class_idx);
+                
+                // Store class pointer in code as raw bytes
+                uint64_t class_ptr = val_class(klass);
+                for (int i = 0; i < 8; i++) {
+                    emit_byte((class_ptr >> (i * 8)) & 0xFF);
+                }
+                
+                // Has parent? emit 1, else 0
+                emit_byte(start_idx > 0 ? 1 : 0);
+                if (start_idx > 0) {
+                    size_t parent_name_idx = (size_t)(uintptr_t)klass->parent;
+                    emit_short(parent_name_idx);
+                    klass->parent = nullptr;  // Reset, will be set at runtime
+                }
+                
+                // Define class in environment
+                size_t name_idx = chunk->add_constant(Value(node->class_name));
+                emit(OpCode::OP_DEFINE_GLOBAL);
+                emit_short(name_idx);
+                break;
+            }
+            // ============================================================================
+            // OOP: PROPERTY ACCESS (obj.property)
+            // ============================================================================
+            case NodeType::GET_ATTR: {
+                // Compile the object
+                compile_node(node->children[0].get());
+                
+                // Emit get property instruction
+                size_t name_idx = chunk->add_constant(Value(node->value));
+                emit(OpCode::OP_GET_PROPERTY);
+                emit_short(name_idx);
                 break;
             }
             case NodeType::CALL: {
@@ -5465,9 +5773,9 @@ class FastVM {
     static constexpr uint32_t HOT_LOOP_THRESHOLD = 100;  // Re-JIT after 100 iterations
     static constexpr uint32_t DEOPT_THRESHOLD = 10;      // Give up after 10 deopts
     
-    alignas(64) uint64_t stack[STACK_MAX];  // Cache-aligned, 8 bytes each!
+    alignas(64) std::unique_ptr<uint64_t[]> stack;  // Heap-allocated for large size
     uint64_t* sp;  // Stack pointer
-    CallFrame frames[FRAMES_MAX];
+    std::unique_ptr<CallFrame[]> frames;  // Heap-allocated frames
     CallFrame* fp;  // Frame pointer
     size_t frame_count;
     
@@ -5495,7 +5803,11 @@ class FastVM {
     size_t try_count = 0;
 
 public:
-    FastVM() : sp(stack), fp(frames), frame_count(0), loop_profile_count(0), inline_cache_count(0) {
+    FastVM() : stack(std::make_unique<uint64_t[]>(STACK_MAX)), 
+               frames(std::make_unique<CallFrame[]>(FRAMES_MAX)),
+               frame_count(0), loop_profile_count(0), inline_cache_count(0) {
+        sp = stack.get();
+        fp = frames.get();
         // Initialize loop profiles
         for (size_t i = 0; i < MAX_LOOPS; i++) {
             loop_profiles[i] = LoopProfile();
@@ -5509,7 +5821,7 @@ public:
     uint64_t run(Chunk* chunk) {
         fp->chunk = chunk;
         fp->ip = chunk->code.data();
-        fp->slots = stack;
+        fp->slots = stack.get();
         frame_count = 1;
         return execute(chunk);
     }
@@ -5591,6 +5903,9 @@ private:
             &&DO_FILE_OPEN, &&DO_FILE_READ, &&DO_FILE_WRITE, &&DO_FILE_CLOSE,
             &&DO_BUILTIN_WRITE_FILE, &&DO_BUILTIN_READ_FILE, &&DO_BUILTIN_FILE_EXISTS,
             &&DO_METHOD_CALL, &&DO_GET_PROPERTY, &&DO_BUILD_MAP,
+            // OOP operations
+            &&DO_CLASS_DEF, &&DO_NEW_INSTANCE, &&DO_SET_PROPERTY, &&DO_GET_SELF, 
+            &&DO_INVOKE_METHOD, &&DO_SUPER_INVOKE,
             // Batch file operations
             &&DO_WRITE_MILLION_LINES, &&DO_READ_MILLION_LINES,
             // Data structure and string operations
@@ -5735,9 +6050,9 @@ private:
             if (profile) {
                 profile->iteration_count++;
                 // Detect type stability - check if top of stack is consistently int
-                if (sp > stack && is_int(sp[-1])) {
+                if (sp > stack.get() && is_int(sp[-1])) {
                     profile->type_state = (profile->type_state == 0 || profile->type_state == 1) ? 1 : 3;
-                } else if (sp > stack && is_number(sp[-1])) {
+                } else if (sp > stack.get() && is_number(sp[-1])) {
                     profile->type_state = (profile->type_state == 0 || profile->type_state == 2) ? 2 : 3;
                 } else {
                     profile->type_state = 3; // Mixed types
@@ -6014,6 +6329,59 @@ private:
             uint8_t argc = READ_BYTE();
             uint64_t callee = sp[-1 - argc];
             
+            // ============================================================================
+            // OOP: CLASS INSTANTIATION
+            // ============================================================================
+            // When calling a class, create an instance and call init()
+            if (is_class(callee)) {
+                ObjClass* klass = as_class(callee);
+                ObjInstance* inst = ObjInstance::create(klass);
+                
+                // Replace class with instance on stack
+                sp[-1 - argc] = val_instance(inst);
+                
+                // Look for init method
+                uint64_t init_method = klass->find_method("init");
+                if (init_method != VAL_NONE) {
+                    ObjFunc* init_func = as_func(init_method);
+                    
+                    // Check arity
+                    if (argc != init_func->arity) {
+                        fprintf(stderr, "Error: init() expects %d args, got %d\n", 
+                                init_func->arity, argc);
+                        exit(1);
+                    }
+                    
+                    // Call init method
+                    fp->ip = ip;
+                    fp++;
+                    frame_count++;
+                    
+                    if (frame_count >= FRAMES_MAX - 1) {
+                        fprintf(stderr, "Stack overflow!\n");
+                        exit(1);
+                    }
+                    
+                    fp->chunk = init_func->chunk;
+                    fp->ip = init_func->chunk->code.data();
+                    fp->slots = sp - argc - 1;  // Instance is at slots[0] ('self')
+                    
+                    ip = fp->ip;
+                    slots = fp->slots;
+                    chunk = fp->chunk;
+                    DISPATCH();
+                } else {
+                    // No init method - just return the instance
+                    if (argc != 0) {
+                        fprintf(stderr, "Error: Class has no init(), but %d args passed\n", argc);
+                        exit(1);
+                    }
+                    sp -= argc;  // Pop arguments (if any)
+                    // Instance is already on stack
+                    DISPATCH();
+                }
+            }
+            
             // ========================================================================
             //  INLINE CACHE: Monomorphic call site optimization
             // ========================================================================
@@ -6134,6 +6502,17 @@ private:
         
         DO_RETURN: {
             uint64_t result = POP();
+            
+            // Special handling for init() method - always return 'self' (the instance)
+            uint64_t self_val = slots[0];
+            if (is_instance(self_val)) {
+                // This might be an init() method returning
+                // Check if the result is None (default return from init)
+                if (result == VAL_NONE) {
+                    result = self_val;  // Return the instance instead
+                }
+            }
+            
             frame_count--;
             if (frame_count == 0) return result;
             
@@ -6812,6 +7191,13 @@ private:
                     case ObjType::LIST: PUSH(val_string("list")); break;
                     case ObjType::FUNCTION: PUSH(val_string("function")); break;
                     case ObjType::RANGE: PUSH(val_string("range")); break;
+                    case ObjType::CLASS: PUSH(val_string("class")); break;
+                    case ObjType::INSTANCE: {
+                        ObjInstance* inst = as_instance(v);
+                        std::string type_str = "instance of " + std::string(inst->klass->name->chars);
+                        PUSH(val_string(type_str.c_str()));
+                        break;
+                    }
                     default: PUSH(val_string("object")); break;
                 }
             }
@@ -6990,13 +7376,13 @@ private:
             // Optimization: Use mmap for large files (>64KB)
             if (size > 65536) {
                 // Memory-map the file for fast reads
-                void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+                void* mapped = platform_mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (mapped != MAP_FAILED) {
                     // Advise kernel for sequential access
-                    madvise(mapped, size, MADV_SEQUENTIAL);
+                    platform_madvise(mapped, size, MADV_SEQUENTIAL);
                     
                     ObjString* result = ObjString::create((const char*)mapped, size);
-                    munmap(mapped, size);
+                    platform_munmap(mapped, size);
                     PUSH(val_string(result));
                     goto file_read_done;
                 }
@@ -7092,10 +7478,47 @@ private:
             
             // Get method name from constants
             const Value& method_name_val = chunk->constants[method_idx];
-            std::string method_name = method_name_val.data.string;
+            const std::string& method_name = method_name_val.data.string;
             
             // Get object (below all arguments)
             uint64_t obj = sp[-1 - argc];
+            
+            // ============================================================================
+            // OOP: Handle instance method calls
+            // ============================================================================
+            if (is_instance(obj)) {
+                ObjInstance* inst = as_instance(obj);
+                ObjClass* klass = inst->klass;
+                
+                // Look up method in class hierarchy
+                uint64_t method = klass->find_method(method_name);
+                if (method == VAL_NONE) {
+                    fprintf(stderr, "Error: Method '%s' not found in class '%s'\n", 
+                            method_name.c_str(), klass->name->chars);
+                    exit(1);
+                }
+                
+                ObjFunc* func = as_func(method);
+                
+                // Set up call frame with 'self' as first argument
+                fp->ip = ip;
+                fp++;
+                frame_count++;
+                
+                if (frame_count >= FRAMES_MAX - 1) {
+                    fprintf(stderr, "Stack overflow in method call!\n");
+                    exit(1);
+                }
+                
+                fp->chunk = func->chunk;
+                fp->ip = func->chunk->code.data();
+                fp->slots = sp - argc - 1;  // 'self' is at slots[0]
+                
+                ip = fp->ip;
+                slots = fp->slots;
+                chunk = fp->chunk;
+                DISPATCH();
+            }
             
             // Handle file methods
             if (method_name == "write" && argc == 1) {
@@ -7117,11 +7540,11 @@ private:
                 
                 // Use mmap for large files
                 if (size > 65536) {
-                    void* mapped = mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+                    void* mapped = platform_mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                     if (mapped != MAP_FAILED) {
-                        madvise(mapped, size, MADV_SEQUENTIAL);
+                        platform_madvise(mapped, size, MADV_SEQUENTIAL);
                         ObjString* result = ObjString::create((const char*)mapped, size);
-                        munmap(mapped, size);
+                        platform_munmap(mapped, size);
                         sp -= argc + 1;
                         PUSH(val_string(result));
                         goto method_read_done;
@@ -7152,10 +7575,37 @@ private:
         } DISPATCH();
         
         DO_GET_PROPERTY: {
-            // Get property from object
+            // Get property from object (instance field or method)
             uint16_t name_idx = READ_SHORT();
-            // For now just return the object itself (placeholder)
-            // Real implementation would look up property in object
+            const Value& name_val = chunk->constants[name_idx];
+            const std::string& prop_name = name_val.data.string;
+            
+            uint64_t obj = POP();
+            
+            if (is_instance(obj)) {
+                ObjInstance* inst = as_instance(obj);
+                
+                // First check instance fields
+                auto it = inst->fields.find(prop_name);
+                if (it != inst->fields.end()) {
+                    PUSH(it->second);
+                    DISPATCH();
+                }
+                
+                // Then check methods in class
+                uint64_t method = inst->klass->find_method(prop_name);
+                if (method != VAL_NONE) {
+                    // Return bound method (for now, just the function - caller handles binding)
+                    PUSH(method);
+                    DISPATCH();
+                }
+                
+                fprintf(stderr, "Error: Instance has no property '%s'\n", prop_name.c_str());
+                exit(1);
+            }
+            
+            // For other object types (future: maps, etc.)
+            PUSH(VAL_NONE);
         } DISPATCH();
         
         DO_BUILD_MAP: {
@@ -7166,18 +7616,198 @@ private:
             PUSH(VAL_NONE);  // Push placeholder
         } DISPATCH();
         
+        // ============================================================================
+        // OOP: CLASS DEFINITION
+        // ============================================================================
+        DO_CLASS_DEF: {
+            uint16_t name_idx = READ_SHORT();
+            
+            // Read class pointer from bytecode (8 bytes)
+            uint64_t class_ptr = 0;
+            for (int i = 0; i < 8; i++) {
+                class_ptr |= ((uint64_t)READ_BYTE()) << (i * 8);
+            }
+            
+            ObjClass* klass = as_class(class_ptr);
+            
+            // Check for parent class
+            uint8_t has_parent = READ_BYTE();
+            if (has_parent) {
+                uint16_t parent_name_idx = READ_SHORT();
+                const Value& parent_name_val = chunk->constants[parent_name_idx];
+                ObjString* parent_name = intern_name(parent_name_val.data.string);
+                
+                uint64_t parent_val = globals[parent_name];
+                if (!is_class(parent_val)) {
+                    fprintf(stderr, "Error: Parent '%s' is not a class\n", parent_name->chars);
+                    exit(1);
+                }
+                klass->parent = as_class(parent_val);
+            }
+            
+            // Push class onto stack (will be stored by DEFINE_GLOBAL)
+            PUSH(class_ptr);
+        } DISPATCH();
+        
+        // ============================================================================
+        // OOP: CREATE NEW INSTANCE
+        // ============================================================================
+        DO_NEW_INSTANCE: {
+            uint64_t class_val = POP();
+            if (!is_class(class_val)) {
+                fprintf(stderr, "Error: Cannot instantiate non-class\n");
+                exit(1);
+            }
+            
+            ObjClass* klass = as_class(class_val);
+            ObjInstance* inst = ObjInstance::create(klass);
+            PUSH(val_instance(inst));
+        } DISPATCH();
+        
+        // ============================================================================
+        // OOP: SET PROPERTY
+        // ============================================================================
+        DO_SET_PROPERTY: {
+            uint16_t name_idx = READ_SHORT();
+            const Value& name_val = chunk->constants[name_idx];
+            const std::string& prop_name = name_val.data.string;
+            
+            uint64_t value = POP();
+            uint64_t obj = PEEK(0);  // Keep instance on stack
+            
+            if (!is_instance(obj)) {
+                fprintf(stderr, "Error: Cannot set property on non-instance\n");
+                exit(1);
+            }
+            
+            ObjInstance* inst = as_instance(obj);
+            inst->fields[prop_name] = value;
+            
+            // Replace instance with value on stack (assignment returns value)
+            sp[-1] = value;
+        } DISPATCH();
+        
+        // ============================================================================
+        // OOP: GET SELF (for method context)
+        // ============================================================================
+        DO_GET_SELF: {
+            // 'self' is always at slot 0 in method frames
+            PUSH(slots[0]);
+        } DISPATCH();
+        
+        // ============================================================================
+        // OOP: INVOKE METHOD (optimized method call)
+        // ============================================================================
+        DO_INVOKE_METHOD: {
+            uint16_t name_idx = READ_SHORT();
+            uint8_t argc = READ_BYTE();
+            
+            const Value& name_val = chunk->constants[name_idx];
+            const std::string& method_name = name_val.data.string;
+            
+            // Get receiver (below arguments)
+            uint64_t receiver = sp[-1 - argc];
+            
+            if (!is_instance(receiver)) {
+                fprintf(stderr, "Error: Can only invoke methods on instances\n");
+                exit(1);
+            }
+            
+            ObjInstance* inst = as_instance(receiver);
+            uint64_t method = inst->klass->find_method(method_name);
+            
+            if (method == VAL_NONE) {
+                fprintf(stderr, "Error: Undefined method '%s'\n", method_name.c_str());
+                exit(1);
+            }
+            
+            ObjFunc* func = as_func(method);
+            
+            // Call method
+            fp->ip = ip;
+            fp++;
+            frame_count++;
+            
+            fp->chunk = func->chunk;
+            fp->ip = func->chunk->code.data();
+            fp->slots = sp - argc - 1;
+            
+            ip = fp->ip;
+            slots = fp->slots;
+            chunk = fp->chunk;
+        } DISPATCH();
+        
+        // ============================================================================
+        // OOP: SUPER INVOKE (call parent method)
+        // ============================================================================
+        DO_SUPER_INVOKE: {
+            uint16_t name_idx = READ_SHORT();
+            uint8_t argc = READ_BYTE();
+            
+            const Value& name_val = chunk->constants[name_idx];
+            const std::string& method_name = name_val.data.string;
+            
+            // Get 'self' (receiver)
+            uint64_t self = slots[0];
+            if (!is_instance(self)) {
+                fprintf(stderr, "Error: 'super' used outside of method\n");
+                exit(1);
+            }
+            
+            ObjInstance* inst = as_instance(self);
+            ObjClass* parent = inst->klass->parent;
+            
+            if (!parent) {
+                fprintf(stderr, "Error: Class has no parent\n");
+                exit(1);
+            }
+            
+            uint64_t method = parent->find_method(method_name);
+            if (method == VAL_NONE) {
+                fprintf(stderr, "Error: Parent has no method '%s'\n", method_name.c_str());
+                exit(1);
+            }
+            
+            ObjFunc* func = as_func(method);
+            
+            // Call parent method with current 'self'
+            fp->ip = ip;
+            fp++;
+            frame_count++;
+            
+            fp->chunk = func->chunk;
+            fp->ip = func->chunk->code.data();
+            fp->slots = sp - argc;  // 'self' already in correct position
+            fp->slots[0] = self;    // Ensure 'self' is current instance
+            
+            ip = fp->ip;
+            slots = fp->slots;
+            chunk = fp->chunk;
+        } DISPATCH();
+        
         // High-performance batch write - 1 Million lines
         DO_WRITE_MILLION_LINES: {
             int64_t count = as_int(POP());
             ObjString* filename = as_string(POP());
             
+            // Bounds check to prevent overflow
+            if (count <= 0 || count > 100000000) {
+                PUSH(VAL_NONE);
+                DISPATCH();
+            }
+            
             // Optimization: Build entire file in memory, single write() syscall
-            size_t estimated_size = count * 80;  // ~80 bytes per line average
+            size_t estimated_size = (size_t)count * 80;  // ~80 bytes per line average
             char* mega_buffer = (char*)malloc(estimated_size);
             char* ptr = mega_buffer;
             
             for (int64_t i = 0; i < count; i++) {
-                ptr += sprintf(ptr, "Line %lld: This is test data for benchmarking file I/O performance!\n", (long long)i);
+                size_t remaining = estimated_size - (size_t)(ptr - mega_buffer);
+                int written = snprintf(ptr, remaining, "Line %lld: This is test data for benchmarking file I/O performance!\n", (long long)i);
+                if (written < 0 || (size_t)written >= remaining) {
+                    break;  // Stop if buffer would overflow
+                }
+                ptr += written;
             }
             
             // Single write syscall - MAXIMUM THROUGHPUT!
@@ -7205,16 +7835,16 @@ private:
                 size_t size = st.st_size;
                 
                 //  MMAP for ultra-fast reading!
-                char* data = (char*)mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
+                char* data = (char*)platform_mmap(nullptr, size, PROT_READ, MAP_PRIVATE, fd, 0);
                 if (data != MAP_FAILED) {
-                    madvise(data, size, MADV_SEQUENTIAL);
+                    platform_madvise(data, size, MADV_SEQUENTIAL);
                     
                     // Count newlines at native speed
                     for (size_t i = 0; i < size; i++) {
                         if (data[i] == '\n') line_count++;
                     }
                     
-                    munmap(data, size);
+                    platform_munmap(data, size);
                 }
                 close(fd);
             }
@@ -7226,9 +7856,15 @@ private:
         DO_LIST_BUILD_TEST: {
             int64_t n = as_int(POP());
             
+            // Bounds check to prevent overflow
+            if (n <= 0 || n > 100000000) {
+                PUSH(val_list(ObjList::create()));
+                DISPATCH();
+            }
+            
             // Native C++ vector allocation!
             ObjList* list = ObjList::create();
-            list->items = (uint64_t*)realloc(list->items, n * sizeof(uint64_t));
+            list->items = (uint64_t*)realloc(list->items, (size_t)n * sizeof(uint64_t));
             list->capacity = n;
             list->count = n;
             
@@ -7383,7 +8019,7 @@ private:
                 std::cerr << "Error: mem_alloc failed for " << size << " bytes" << std::endl;
                 return VAL_NONE;
             }
-            PUSH(val_int(reinterpret_cast<long>(ptr)));
+            PUSH(val_int(static_cast<long>(reinterpret_cast<intptr_t>(ptr))));
         } DISPATCH();
         
         DO_MEM_FREE: {
@@ -8070,10 +8706,16 @@ private:
     
     void init_dirs() {
         const char* home = std::getenv("HOME");
+        if (!home) home = std::getenv("USERPROFILE");  // Windows fallback
+        if (!home) home = std::getenv("APPDATA");  // Another Windows fallback
         if (!home) home = ".";
         levython_home = fs::path(home) / ".levython";
         packages_dir = levython_home / "packages";
-        fs::create_directories(packages_dir);
+        try {
+            fs::create_directories(packages_dir);
+        } catch (...) {
+            // Silently ignore directory creation errors
+        }
     }
     
     std::string generate_package_code(const std::string& name) {
@@ -8168,12 +8810,17 @@ public:
         print_header();
         std::cout << "Usage: levython lpm <command> [args]\n\n"
                   << "Commands:\n"
-                  << "  install <pkg>   Install a package\n"
+                  << "  install <pkg>   Install a package (use 'all' for all packages)\n"
                   << "  remove <pkg>    Remove a package\n"
+                  << "  update          Update all installed packages\n"
                   << "  list            List installed packages\n"
-                  << "  search [query]  Search packages\n"
-                  << "  info <pkg>      Show package info\n\n"
-                  << "Packages: math, tensor, ml, random, test, string, json, http, csv\n" << std::endl;
+                  << "  search [query]  Search available packages\n"
+                  << "  info <pkg>      Show package details\n\n"
+                  << "Aliases:\n"
+                  << "  ls = list, find = search, show = info, upgrade = update\n\n"
+                  << "Available packages:\n"
+                  << "  math, tensor, ml, nn, random, test, string, json, http, csv,\n"
+                  << "  sql, crypto, cli, time, file\n" << std::endl;
     }
     
     int install(const std::string& name) {
@@ -8225,16 +8872,59 @@ public:
         return 0;
     }
     
+    int update_packages() {
+        print_info("Checking for package updates...");
+        auto inst = get_installed();
+        if (inst.empty()) {
+            print_info("No packages installed to update");
+            return 0;
+        }
+        int updated = 0;
+        for (const auto& [name, ver] : inst) {
+            auto it = official_packages.find(name);
+            if (it != official_packages.end() && it->second.version != ver) {
+                print_info("Updating " + name + ": " + ver + " -> " + it->second.version);
+                write_package(name, it->second.version);
+                updated++;
+            }
+        }
+        if (updated == 0) {
+            print_success("All packages are up to date");
+        } else {
+            print_success("Updated " + std::to_string(updated) + " package(s)");
+        }
+        return 0;
+    }
+    
+    int install_all() {
+        print_info("Installing all available packages...");
+        for (const auto& [name, info] : official_packages) {
+            install(name);
+        }
+        return 0;
+    }
+    
     int run(int argc, char* argv[]) {
         if (argc < 3) { print_help(); return 0; }
         std::string cmd = argv[2];
-        if (cmd == "help") { print_help(); return 0; }
-        if (cmd == "install" && argc >= 4) { for (int i = 3; i < argc; i++) install(argv[i]); return 0; }
+        if (cmd == "help" || cmd == "-h" || cmd == "--help") { print_help(); return 0; }
+        if (cmd == "install") {
+            if (argc >= 4) {
+                std::string pkg = argv[3];
+                if (pkg == "all" || pkg == "--all") return install_all();
+                for (int i = 3; i < argc; i++) install(argv[i]);
+                return 0;
+            }
+            print_error("Usage: levython lpm install <package>");
+            return 1;
+        }
         if ((cmd == "remove" || cmd == "uninstall") && argc >= 4) { for (int i = 3; i < argc; i++) remove(argv[i]); return 0; }
-        if (cmd == "list") return list();
-        if (cmd == "search") return search(argc >= 4 ? argv[3] : "");
-        if (cmd == "info" && argc >= 4) return info(argv[3]);
-        print_error("Unknown: " + cmd);
+        if (cmd == "list" || cmd == "ls") return list();
+        if (cmd == "search" || cmd == "find") return search(argc >= 4 ? argv[3] : "");
+        if (cmd == "info" || cmd == "show") { if (argc >= 4) return info(argv[3]); return search(""); }
+        if (cmd == "update" || cmd == "upgrade") return update_packages();
+        print_error("Unknown command: " + cmd);
+        std::cout << "Run 'levython lpm help' for usage\n";
         return 1;
     }
 };
@@ -8264,11 +8954,17 @@ private:
     
     void init_dirs() {
         const char* home = std::getenv("HOME");
+        if (!home) home = std::getenv("USERPROFILE");  // Windows fallback
+        if (!home) home = std::getenv("APPDATA");  // Another Windows fallback
         if (!home) home = ".";
         levython_home = fs::path(home) / ".levython";
         update_cache = levython_home / "cache";
         last_check_file = levython_home / ".last_update_check";
-        fs::create_directories(update_cache);
+        try {
+            fs::create_directories(update_cache);
+        } catch (...) {
+            // Silently ignore directory creation errors
+        }
     }
     
     // Parse version string to compare (e.g., "1.2.3" -> 1002003)
@@ -8297,10 +8993,20 @@ private:
     
     // Fetch latest version from GitHub (using curl with timeout)
     std::string fetch_latest_version() {
+#ifdef _WIN32
+        // Windows: use curl without bash-style redirection
+        std::string cmd = "curl -s --connect-timeout 3 --max-time 5 -H \"Accept: application/vnd.github.v3+json\" "
+                          "\"https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest\" 2>nul";
+#else
         std::string cmd = "curl -s --connect-timeout 3 --max-time 5 -H 'Accept: application/vnd.github.v3+json' "
                           "'https://api.github.com/repos/" + GITHUB_REPO + "/releases/latest' 2>/dev/null";
+#endif
         
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
         FILE* pipe = popen(cmd.c_str(), "r");
+#endif
         if (!pipe) return "";
         
         std::string result;
@@ -8308,7 +9014,11 @@ private:
         while (fgets(buffer, sizeof(buffer), pipe)) {
             result += buffer;
         }
+#ifdef _WIN32
+        _pclose(pipe);
+#else
         pclose(pipe);
+#endif
         
         // Parse "tag_name" from JSON response
         size_t pos = result.find("\"tag_name\"");
@@ -8536,7 +9246,7 @@ int main(int argc, char* argv[]) {
     Compiler compiler;
     auto chunk = compiler.compile(ast.get());
     
-    // Run with FastVM - built with sleepless nights!
+    // Run with FastVM that uses NaN-boxing and optimized instruction dispatch
     FastVM vm;
     vm.run(chunk.get());
     

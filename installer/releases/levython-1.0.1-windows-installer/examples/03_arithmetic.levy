@@ -1,0 +1,45 @@
+# ==============================================================================
+# 03_arithmetic.levy - Math Operations
+# ==============================================================================
+# Levython supports all standard arithmetic operations.
+#
+# Operators:
+#   +   Addition
+#   -   Subtraction
+#   *   Multiplication
+#   /   Division
+#   %   Modulo (remainder)
+#   **  Power (exponentiation)
+# ==============================================================================
+
+a <- 10
+b <- 3
+
+say("=== Basic Arithmetic ===")
+say("a = " + str(a))
+say("b = " + str(b))
+
+say("a + b = " + str(a + b))    # 13
+say("a - b = " + str(a - b))    # 7
+say("a * b = " + str(a * b))    # 30
+say("a / b = " + str(a / b))    # 3.333...
+say("a % b = " + str(a % b))    # 1 (remainder)
+say("a ^ b = " + str(a ^ b))    # 1000 (10^3)
+
+say("")
+say("=== Math Functions ===")
+say("sqrt(16) = " + str(sqrt(16)))     # 4
+say("abs(-42) = " + str(abs(-42)))     # 42
+say("floor(3.7) = " + str(floor(3.7))) # 3
+say("ceil(3.2) = " + str(ceil(3.2)))   # 4
+say("round(3.5) = " + str(round(3.5))) # 4
+say("pow(2, 10) = " + str(pow(2, 10))) # 1024
+
+say("")
+say("=== Compound Assignment ===")
+x <- 10
+say("x = " + str(x))
+x <- x + 5
+say("x + 5 = " + str(x))  # 15
+x <- x * 2
+say("x * 2 = " + str(x))  # 30

@@ -1,0 +1,69 @@
+# ============================================
+# Levython OOP Basics Example
+# ============================================
+# This example demonstrates:
+# - Class definition
+# - Constructor (init)
+# - Instance methods
+# - Properties (attributes)
+
+say("=== Object-Oriented Programming in Levython ===")
+say("")
+
+# Define a simple class
+class Person {
+    # Constructor - called when creating an instance
+    init(name, age) {
+        self.name <- name
+        self.age <- age
+    }
+    
+    # Instance method
+    act greet() {
+        say("Hello, my name is " + self.name)
+    }
+    
+    # Method with return value
+    act get_info() {
+        -> self.name + " is " + str(self.age) + " years old"
+    }
+    
+    # Method that modifies state
+    act have_birthday() {
+        self.age <- self.age + 1
+        say(self.name + " is now " + str(self.age) + " years old!")
+    }
+}
+
+# Create instances
+say("Creating person objects...")
+alice <- Person("Alice", 25)
+bob <- Person("Bob", 30)
+
+# Access properties
+say("Alice's name: " + alice.name)
+say("Bob's age: " + str(bob.age))
+say("")
+
+# Call methods
+say("Calling methods:")
+alice.greet()
+bob.greet()
+say("")
+
+# Methods with return values
+say("Getting info:")
+say(alice.get_info())
+say(bob.get_info())
+say("")
+
+# Modifying state through methods
+say("Having birthdays:")
+alice.have_birthday()
+bob.have_birthday()
+say("")
+
+# Multiple instances are independent
+say("Verifying independence:")
+say("Alice: " + alice.get_info())
+say("Bob: " + bob.get_info())
