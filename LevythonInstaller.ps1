@@ -9,7 +9,7 @@
     - Installs VS Code extension
     - Creates file associations
 .NOTES
-    Version: 1.0.1
+    Version: 1.1.0
     Author: Levython Authors
 #>
 
@@ -22,10 +22,14 @@ Add-Type -AssemblyName PresentationFramework
 # CONFIGURATION
 # ============================================================================
 $script:AppName = "Levython"
-$script:AppVersion = "1.0.1"
+$script:AppVersion = "1.1.0"
 $script:InstallDir = "$env:ProgramFiles\Levython"
 $script:SourceDir = $PSScriptRoot
 $script:LogFile = "$env:TEMP\levython-install.log"
+
+# Compiler selection (user-defined)
+# Allowed values: "mingw", "clang", "msvc"
+$script:CompilerChoice = "mingw"
 
 # Architecture detection
 $script:Architecture = switch ([System.Environment]::Is64BitOperatingSystem) {
@@ -47,7 +51,7 @@ function Write-Log {
     
     switch ($Level) {
         "ERROR" { Write-Host $logMessage -ForegroundColor Red }
-        "WARN"  { Write-Host $logMessage -ForegroundColor Yellow }
+        "WARN" { Write-Host $logMessage -ForegroundColor Yellow }
         "SUCCESS" { Write-Host $logMessage -ForegroundColor Green }
         default { Write-Host $logMessage }
     }
@@ -78,32 +82,54 @@ function Get-VSCodePath {
 }
 
 function Find-Compiler {
-    # Check for g++ (MinGW)
-    $gpp = Get-Command g++ -ErrorAction SilentlyContinue
-    if ($gpp) {
-        return @{ Type = "g++"; Path = $gpp.Source }
-    }
-    
-    # Check for cl.exe (MSVC)
-    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-    if (Test-Path $vsWhere) {
-        $vsPath = & $vsWhere -latest -property installationPath 2>$null
-        if ($vsPath) {
-            # Look for cl.exe
-            $clPaths = Get-ChildItem -Path "$vsPath\VC\Tools\MSVC" -Recurse -Filter "cl.exe" -ErrorAction SilentlyContinue
-            if ($clPaths) {
-                return @{ Type = "msvc"; Path = $clPaths[0].FullName; VsPath = $vsPath }
+
+    Write-Log "Compiler choice: $script:CompilerChoice" "INFO"
+
+    switch ($script:CompilerChoice) {
+
+        "mingw" {
+            $gpp = Get-Command g++ -ErrorAction SilentlyContinue
+            if ($gpp) {
+                return @{ Type = "g++"; Path = $gpp.Source }
+            }
+            throw "MinGW selected, but g++ was not found in PATH. Please install MSYS2/MinGW and add it to PATH."
+        }
+
+        "clang" {
+            $clang = Get-Command clang++ -ErrorAction SilentlyContinue
+            if ($clang) {
+                return @{ Type = "clang++"; Path = $clang.Source }
+            }
+            throw "Clang selected, but clang++ was not found in PATH. Please install LLVM/Clang and add it to PATH."
+        }
+
+        "msvc" {
+
+            $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+            if (-not (Test-Path $vsWhere)) {
+                throw "Visual Studio Installer not found"
+            }
+
+            $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+
+            if (-not $vsPath) {
+                throw "MSVC Build Tools not installed"
+            }
+
+            $vcvarsall = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
+            if (-not (Test-Path $vcvarsall)) {
+                throw "vcvarsall.bat not found"
+            }
+
+            return @{
+                Type   = "msvc"
+                VsPath = $vsPath
             }
         }
+        default {
+            throw "Invalid CompilerChoice: $script:CompilerChoice (expected 'mingw', 'clang', or 'msvc')"
+        }
     }
-    
-    # Check for clang++
-    $clang = Get-Command clang++ -ErrorAction SilentlyContinue
-    if ($clang) {
-        return @{ Type = "clang++"; Path = $clang.Source }
-    }
-    
-    return $null
 }
 
 function Add-ToPath {
@@ -179,7 +205,7 @@ function Build-Levython {
                 "/O2",
                 "/EHsc",
                 "/DNDEBUG",
-                "/Fe:$OutputPath",
+                "/Fe:`"$OutputPath`"",
                 $srcFile
             )
         }
@@ -187,23 +213,30 @@ function Build-Levython {
     
     try {
         if ($compiler.Type -eq "msvc") {
+
             # Use Developer Command Prompt
             $vcvarsall = Join-Path $compiler.VsPath "VC\Auxiliary\Build\vcvarsall.bat"
-            $arch = if ($script:Architecture -eq "x64") { "x64" } else { "x86" }
+
+            # IMPORTANT: vcvarsall uses amd64, NOT x64
+            $arch = "amd64"
+
             $cmd = "`"$vcvarsall`" $arch && cl.exe $($buildArgs -join ' ')"
+            Write-Log "Running MSVC build: $cmd" "INFO"
+
             $result = cmd.exe /c $cmd 2>&1
-        } else {
+        }
+        else {
             $result = & $compiler.Path $buildArgs 2>&1
         }
-        
+
         if ($LASTEXITCODE -ne 0) {
             throw "Build failed: $result"
         }
-        
+
         if (-not (Test-Path $OutputPath)) {
             throw "Build completed but executable not found"
         }
-        
+
         Write-Log "Build successful: $OutputPath" "SUCCESS"
         return $true
     }
@@ -242,7 +275,8 @@ function Install-Levython {
     if (Test-Path $prebuiltPath) {
         Write-Log "Using pre-built binary..." "INFO"
         Copy-Item -Path $prebuiltPath -Destination $targetExe -Force
-    } else {
+    }
+    else {
         Write-Log "Building from source..." "INFO"
         Build-Levython -OutputPath $targetExe
     }
@@ -284,7 +318,8 @@ function Install-Levython {
                     Write-Log "VS Code extension installation failed: $_" "WARN"
                 }
             }
-        } else {
+        }
+        else {
             Write-Log "VS Code not found, skipping extension installation" "WARN"
         }
     }
@@ -388,7 +423,7 @@ function Show-InstallerGUI {
     # Create main form
     $form = New-Object System.Windows.Forms.Form
     $form.Text = "Levython Installer"
-    $form.Size = New-Object System.Drawing.Size(600, 500)
+    $form.Size = New-Object System.Drawing.Size(600, 560)
     $form.StartPosition = "CenterScreen"
     $form.FormBorderStyle = "FixedDialog"
     $form.MaximizeBox = $false
@@ -416,7 +451,7 @@ function Show-InstallerGUI {
     $subtitleLabel.Text = "High Performance Programming Language v$script:AppVersion"
     $subtitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $subtitleLabel.ForeColor = [System.Drawing.Color]::FromArgb(200, 200, 200)
-    $subtitleLabel.Location = New-Object System.Drawing.Point(25, 60)
+    $subtitleLabel.Location = New-Object System.Drawing.Point(25, 70)
     $subtitleLabel.AutoSize = $true
     $headerPanel.Controls.Add($subtitleLabel)
     
@@ -455,13 +490,13 @@ function Show-InstallerGUI {
     $browseButton.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $browseButton.ForeColor = [System.Drawing.Color]::White
     $browseButton.Add_Click({
-        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-        $folderDialog.Description = "Select installation directory"
-        $folderDialog.SelectedPath = $pathTextBox.Text
-        if ($folderDialog.ShowDialog() -eq "OK") {
-            $pathTextBox.Text = $folderDialog.SelectedPath
-        }
-    })
+            $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+            $folderDialog.Description = "Select installation directory"
+            $folderDialog.SelectedPath = $pathTextBox.Text
+            if ($folderDialog.ShowDialog() -eq "OK") {
+                $pathTextBox.Text = $folderDialog.SelectedPath
+            }
+        })
     $pathGroup.Controls.Add($browseButton)
     
     # Options Group
@@ -469,15 +504,41 @@ function Show-InstallerGUI {
     $optionsGroup.Text = "Installation Options"
     $optionsGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $optionsGroup.ForeColor = [System.Drawing.Color]::White
-    $optionsGroup.Size = New-Object System.Drawing.Size(550, 150)
+    $optionsGroup.Size = New-Object System.Drawing.Size(550, 245)
     $optionsGroup.Location = New-Object System.Drawing.Point(20, 195)
     $form.Controls.Add($optionsGroup)
+
+    # Compiler label
+    $lblCompiler = New-Object System.Windows.Forms.Label
+    $lblCompiler.Text = "Select Compiler:"
+    $lblCompiler.Location = New-Object System.Drawing.Point(15, 25)
+    $lblCompiler.AutoSize = $true
+    $optionsGroup.Controls.Add($lblCompiler)
+
+    $rbMinGW = New-Object System.Windows.Forms.RadioButton
+    $rbMinGW.Text = "MinGW (g++) — Recommended"
+    $rbMinGW.Location = New-Object System.Drawing.Point(30, 45)
+    $rbMinGW.AutoSize = $true
+    $rbMinGW.Checked = $true
+    $optionsGroup.Controls.Add($rbMinGW)
+
+    $rbClang = New-Object System.Windows.Forms.RadioButton
+    $rbClang.Text = "Clang (clang++) — Advanced / Fast"
+    $rbClang.Location = New-Object System.Drawing.Point(30, 70)
+    $rbClang.AutoSize = $true
+    $optionsGroup.Controls.Add($rbClang)
+
+    $rbMSVC = New-Object System.Windows.Forms.RadioButton
+    $rbMSVC.Text = "Visual Studio (MSVC) — Experimental (may fail)"
+    $rbMSVC.Location = New-Object System.Drawing.Point(30, 95)
+    $rbMSVC.AutoSize = $true
+    $optionsGroup.Controls.Add($rbMSVC)
     
     $chkPath = New-Object System.Windows.Forms.CheckBox
     $chkPath.Text = "Add Levython to system PATH (recommended)"
     $chkPath.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $chkPath.Size = New-Object System.Drawing.Size(500, 25)
-    $chkPath.Location = New-Object System.Drawing.Point(15, 25)
+    $chkPath.Location = New-Object System.Drawing.Point(15, 130)
     $chkPath.ForeColor = [System.Drawing.Color]::White
     $chkPath.Checked = $true
     $optionsGroup.Controls.Add($chkPath)
@@ -486,7 +547,7 @@ function Show-InstallerGUI {
     $chkVSCode.Text = "Install VS Code extension (syntax highlighting & snippets)"
     $chkVSCode.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $chkVSCode.Size = New-Object System.Drawing.Size(500, 25)
-    $chkVSCode.Location = New-Object System.Drawing.Point(15, 55)
+    $chkVSCode.Location = New-Object System.Drawing.Point(15, 155)
     $chkVSCode.ForeColor = [System.Drawing.Color]::White
     $chkVSCode.Checked = $true
     $optionsGroup.Controls.Add($chkVSCode)
@@ -495,7 +556,7 @@ function Show-InstallerGUI {
     $chkAssociate.Text = "Associate .levy and .ly files with Levython"
     $chkAssociate.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $chkAssociate.Size = New-Object System.Drawing.Size(500, 25)
-    $chkAssociate.Location = New-Object System.Drawing.Point(15, 85)
+    $chkAssociate.Location = New-Object System.Drawing.Point(15, 180)
     $chkAssociate.ForeColor = [System.Drawing.Color]::White
     $chkAssociate.Checked = $true
     $optionsGroup.Controls.Add($chkAssociate)
@@ -504,7 +565,7 @@ function Show-InstallerGUI {
     $chkShortcut.Text = "Create Start Menu shortcut"
     $chkShortcut.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $chkShortcut.Size = New-Object System.Drawing.Size(500, 25)
-    $chkShortcut.Location = New-Object System.Drawing.Point(15, 115)
+    $chkShortcut.Location = New-Object System.Drawing.Point(15, 205)
     $chkShortcut.ForeColor = [System.Drawing.Color]::White
     $chkShortcut.Checked = $true
     $optionsGroup.Controls.Add($chkShortcut)
@@ -530,81 +591,104 @@ function Show-InstallerGUI {
     $installButton = New-Object System.Windows.Forms.Button
     $installButton.Text = "Install"
     $installButton.Size = New-Object System.Drawing.Size(120, 40)
-    $installButton.Location = New-Object System.Drawing.Point(350, 415)
+    $installButton.Location = New-Object System.Drawing.Point(340, 470)
     $installButton.FlatStyle = "Flat"
     $installButton.BackColor = [System.Drawing.Color]::FromArgb(0, 122, 204)
     $installButton.ForeColor = [System.Drawing.Color]::White
     $installButton.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
     $installButton.Add_Click({
-        if (-not (Test-Administrator)) {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Administrator privileges required. Please run as Administrator.",
-                "Privilege Required",
-                "OK",
-                "Warning"
-            )
-            return
-        }
+            if (-not (Test-Administrator)) {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Administrator privileges required. Please run as Administrator.",
+                    "Privilege Required",
+                    "OK",
+                    "Warning"
+                )
+                return
+            }
         
-        $installButton.Enabled = $false
-        $cancelButton.Enabled = $false
-        $progressBar.Visible = $true
-        $progressBar.Value = 0
+            $installButton.Enabled = $false
+            $cancelButton.Enabled = $false
+            $progressBar.Visible = $true
+            $progressBar.Value = 0
         
-        try {
-            $statusLabel.Text = "Preparing installation..."
-            $progressBar.Value = 10
-            $form.Refresh()
+            try {
+                $statusLabel.Text = "Preparing installation..."
+                $progressBar.Value = 10
+                $form.Refresh()
             
-            $statusLabel.Text = "Installing Levython..."
-            $progressBar.Value = 30
-            $form.Refresh()
+                if ($rbMinGW.Checked) {
+                    $script:CompilerChoice = "mingw"
+                }
+                elseif ($rbClang.Checked) {
+                    $script:CompilerChoice = "clang"
+                }
+                elseif ($rbMSVC.Checked) {
+                    $script:CompilerChoice = "msvc"
+                }
+                else {
+                    throw "No compiler selected"
+                }
+
+                Write-Log "User selected compiler: $script:CompilerChoice"
+
+                if ($script:CompilerChoice -eq "clang") {
+                    Write-Log "Clang selected — ensure LLVM is installed and clang++ is in PATH" "INFO"
+                }
+
+                if ($script:CompilerChoice -eq "msvc") {
+                    Write-Log "MSVC is experimental and may fail due to VM dispatch optimizations" "WARN"
+                }
+
+                $statusLabel.Text = "Installing Levython..."
+                $progressBar.Value = 30
+                $form.Refresh()
             
-            Install-Levython `
-                -InstallPath $pathTextBox.Text `
-                -AddToPath $chkPath.Checked `
-                -InstallVSCode $chkVSCode.Checked `
-                -CreateShortcut $chkShortcut.Checked `
-                -AssociateFiles $chkAssociate.Checked
+                Install-Levython `
+                    -InstallPath $pathTextBox.Text `
+                    -AddToPath $chkPath.Checked `
+                    -InstallVSCode $chkVSCode.Checked `
+                    -CreateShortcut $chkShortcut.Checked `
+                    -AssociateFiles $chkAssociate.Checked
             
-            $progressBar.Value = 100
-            $statusLabel.Text = "Installation complete!"
+                $progressBar.Value = 100
+                $statusLabel.Text = "Installation complete!"
             
-            [System.Windows.Forms.MessageBox]::Show(
-                "Levython has been installed successfully!`n`nYou can now use 'levython' from any command prompt.`n`nCheck out the examples in:`n$($pathTextBox.Text)\examples",
-                "Installation Complete",
-                "OK",
-                "Information"
-            )
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Levython has been installed successfully!`n`nYou can now use 'levython' from any command prompt.`n`nCheck out the examples in:`n$($pathTextBox.Text)\examples",
+                    "Installation Complete",
+                    "OK",
+                    "Information"
+                )
             
-            $form.Close()
-        }
-        catch {
-            [System.Windows.Forms.MessageBox]::Show(
-                "Installation failed: $_`n`nCheck the log file: $script:LogFile",
-                "Installation Error",
-                "OK",
-                "Error"
-            )
-            $installButton.Enabled = $true
-            $cancelButton.Enabled = $true
-            $progressBar.Visible = $false
-        }
-    })
+                $form.Close()
+            }
+            catch {
+                [System.Windows.Forms.MessageBox]::Show(
+                    "Installation failed: $_`n`nCheck the log file: $script:LogFile",
+                    "Installation Error",
+                    "OK",
+                    "Error"
+                )
+                $installButton.Enabled = $true
+                $cancelButton.Enabled = $true
+                $progressBar.Visible = $false
+            }
+        })
     $form.Controls.Add($installButton)
     
     # Cancel Button
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = "Cancel"
     $cancelButton.Size = New-Object System.Drawing.Size(100, 40)
-    $cancelButton.Location = New-Object System.Drawing.Point(480, 415)
+    $cancelButton.Location = New-Object System.Drawing.Point(470, 470)
     $cancelButton.FlatStyle = "Flat"
     $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
     $cancelButton.ForeColor = [System.Drawing.Color]::White
     $cancelButton.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $cancelButton.Add_Click({
-        $form.Close()
-    })
+            $form.Close()
+        })
     $form.Controls.Add($cancelButton)
     
     # Footer
@@ -612,7 +696,7 @@ function Show-InstallerGUI {
     $footerLabel.Text = "© 2024-2026 Levython Authors | JIT-Compiled • Bytecode VM • Faster than C"
     $footerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $footerLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 100)
-    $footerLabel.Location = New-Object System.Drawing.Point(20, 465)
+    $footerLabel.Location = New-Object System.Drawing.Point(20, 445)
     $footerLabel.AutoSize = $true
     $form.Controls.Add($footerLabel)
     
