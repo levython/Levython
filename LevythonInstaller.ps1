@@ -516,20 +516,20 @@ function Show-InstallerGUI {
     $optionsGroup.Controls.Add($lblCompiler)
 
     $rbMinGW = New-Object System.Windows.Forms.RadioButton
-    $rbMinGW.Text = "MinGW (g++) — Recommended"
+    $rbMinGW.Text = "MinGW (g++) - Recommended"
     $rbMinGW.Location = New-Object System.Drawing.Point(30, 45)
     $rbMinGW.AutoSize = $true
     $rbMinGW.Checked = $true
     $optionsGroup.Controls.Add($rbMinGW)
 
     $rbClang = New-Object System.Windows.Forms.RadioButton
-    $rbClang.Text = "Clang (clang++) — Advanced / Fast"
+    $rbClang.Text = "Clang (clang++) - Advanced / Fast"
     $rbClang.Location = New-Object System.Drawing.Point(30, 70)
     $rbClang.AutoSize = $true
     $optionsGroup.Controls.Add($rbClang)
 
     $rbMSVC = New-Object System.Windows.Forms.RadioButton
-    $rbMSVC.Text = "Visual Studio (MSVC) — Experimental (may fail)"
+    $rbMSVC.Text = "Visual Studio (MSVC) - Experimental (may fail)"
     $rbMSVC.Location = New-Object System.Drawing.Point(30, 95)
     $rbMSVC.AutoSize = $true
     $optionsGroup.Controls.Add($rbMSVC)
@@ -544,7 +544,7 @@ function Show-InstallerGUI {
     $optionsGroup.Controls.Add($chkPath)
     
     $chkVSCode = New-Object System.Windows.Forms.CheckBox
-    $chkVSCode.Text = "Install VS Code extension (syntax highlighting & snippets)"
+    $chkVSCode.Text = "Install VS Code extension (syntax highlighting and snippets)"
     $chkVSCode.Font = New-Object System.Drawing.Font("Segoe UI", 10)
     $chkVSCode.Size = New-Object System.Drawing.Size(500, 25)
     $chkVSCode.Location = New-Object System.Drawing.Point(15, 155)
@@ -633,7 +633,7 @@ function Show-InstallerGUI {
                 Write-Log "User selected compiler: $script:CompilerChoice"
 
                 if ($script:CompilerChoice -eq "clang") {
-                    Write-Log "Clang selected — ensure LLVM is installed and clang++ is in PATH" "INFO"
+                    Write-Log "Clang selected - ensure LLVM is installed and clang++ is in PATH" "INFO"
                 }
 
                 if ($script:CompilerChoice -eq "msvc") {
@@ -693,7 +693,7 @@ function Show-InstallerGUI {
     
     # Footer
     $footerLabel = New-Object System.Windows.Forms.Label
-    $footerLabel.Text = "© 2024-2026 Levython Authors | JIT-Compiled • Bytecode VM • Faster than C"
+    $footerLabel.Text = "(c) 2024-2026 Levython Authors | JIT-Compiled * Bytecode VM * Faster than C"
     $footerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
     $footerLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 100)
     $footerLabel.Location = New-Object System.Drawing.Point(20, 445)
