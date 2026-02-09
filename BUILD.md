@@ -107,7 +107,7 @@ build-windows.bat --arch=both
 # 3. Build installer
 build-installer.bat
 
-# Output: releases\levython-1.0.1-windows-installer.exe
+# Output: releases\levython-1.0.2-windows-installer.exe
 ```
 
 ---

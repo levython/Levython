@@ -8,7 +8,7 @@
  * 
  * @file    levython.cpp
  * @brief   Complete implementation of the Levython programming language
- * @version 1.0.1
+ * @version 1.0.2
  * 
  * OVERVIEW
  * --------
@@ -59,6 +59,7 @@
 #include <memory>
 #include <fstream>
 #include <sstream>
+#include <iomanip>
 #include <stdexcept>
 #include <algorithm>
 #include <future>
@@ -66,14 +67,41 @@
 #include <filesystem>
 #include <cmath>
 #include <utility>
+#include <cstdarg>
+#include <ctime>
+#include <random>
 #include <unordered_map>
+#include <unordered_set>
+#include <set>
+#include <functional>
+#include <queue>
+#include <deque>
+#include <mutex>
+#include <thread>
+#include <condition_variable>
+#include <atomic>
 #include <cstdint>
 #include <cstring>     // For memcpy
+#include <cctype>
+#include <cstdlib>
+#include <cstdio>
+#include <openssl/evp.h>
+#include <openssl/hmac.h>
+#include <openssl/rand.h>
+#ifndef _WIN32
+#include <sys/wait.h>
+#endif
+
+// HTTP Module
+#include "http_client.hpp"
 
 // Platform-specific headers
 #ifdef _WIN32
     #define WIN32_LEAN_AND_MEAN
     #include <windows.h>
+    #include <winsock2.h>
+    #include <ws2tcpip.h>
+    #include <conio.h>
     #include <io.h>
     #include <fcntl.h>  // For file constants
     #include <sys/stat.h>
@@ -100,6 +128,13 @@
     #include <sys/stat.h>  // For fstat
     #include <fcntl.h>     // For open()
     #include <unistd.h>    // For close()
+    #include <termios.h>
+    #include <sys/select.h>
+    #include <sys/socket.h>
+    #include <netdb.h>
+    #include <netinet/in.h>
+    #include <arpa/inet.h>
+    #include <errno.h>
 #endif
 
 // Fix Windows macro conflicts with Levython language tokens
@@ -318,10 +353,13 @@ struct ObjClass : Obj {
     ObjString* name;
     ObjClass* parent;  // Parent class for inheritance (nullable)
     std::unordered_map<std::string, uint64_t> methods;  // Method name -> ObjFunc
+    std::unordered_set<std::string> abstract_methods;  // Declared abstract methods
+    bool is_abstract;  // Whether class is explicitly abstract
     uint8_t arity;  // Number of init parameters
     
     static ObjClass* create(const char* name);
     uint64_t find_method(const std::string& name) const;
+    void collect_missing_abstract_methods(std::unordered_set<std::string>& missing) const;
 };
 
 /**
@@ -331,8 +369,18 @@ struct ObjClass : Obj {
 struct ObjInstance : Obj {
     ObjClass* klass;  // The class this is an instance of
     std::unordered_map<std::string, uint64_t> fields;  // Instance attributes
-    
+
     static ObjInstance* create(ObjClass* klass);
+};
+
+/**
+ * Map object for module storage
+ * Used for the import system to store module functions
+ */
+struct ObjMap : Obj {
+  std::unordered_map<ObjString*, uint64_t> data; // Key -> NaN-boxed value
+
+  static ObjMap *create();
 };
 
 // ============================================================================
@@ -1418,6 +1466,7 @@ ObjClass* ObjClass::create(const char* name) {
     c->next = nullptr;
     c->name = g_strings.intern(name, strlen(name));
     c->parent = nullptr;
+    c->is_abstract = false;
     c->arity = 0;
     return c;
 }
@@ -1430,6 +1479,18 @@ uint64_t ObjClass::find_method(const std::string& name) const {
     return VAL_NONE;
 }
 
+void ObjClass::collect_missing_abstract_methods(std::unordered_set<std::string>& missing) const {
+    if (parent) {
+        parent->collect_missing_abstract_methods(missing);
+    }
+    for (const auto& name : abstract_methods) {
+        missing.insert(name);
+    }
+    for (const auto& method : methods) {
+        missing.erase(method.first);
+    }
+}
+
 ObjInstance* ObjInstance::create(ObjClass* klass) {
     ObjInstance* inst = new ObjInstance();
     inst->type = ObjType::INSTANCE;
@@ -1437,6 +1498,14 @@ ObjInstance* ObjInstance::create(ObjClass* klass) {
     inst->next = nullptr;
     inst->klass = klass;
     return inst;
+}
+
+ObjMap *ObjMap::create() {
+  ObjMap *m = new ObjMap();
+  m->type = ObjType::MAP;
+  m->marked = false;
+  m->next = nullptr;
+  return m;
 }
 
 // ============================================================================
@@ -1473,13 +1542,18 @@ inline ObjList* as_list(uint64_t v) { return (ObjList*)as_obj(v); }
 inline ObjRange* as_range(uint64_t v) { return (ObjRange*)as_obj(v); }
 inline ObjClass* as_class(uint64_t v) { return (ObjClass*)as_obj(v); }
 inline ObjInstance* as_instance(uint64_t v) { return (ObjInstance*)as_obj(v); }
+inline ObjMap* as_map(uint64_t v) { return (ObjMap*)as_obj(v); }
 inline ObjType obj_type(uint64_t v) { return as_obj(v)->type; }
 
 // OOP value helpers
 inline uint64_t val_class(ObjClass* c) { return val_obj((Obj*)c); }
 inline uint64_t val_instance(ObjInstance* i) { return val_obj((Obj*)i); }
+inline uint64_t val_map(ObjMap* m) { return val_obj((Obj*)m); }
 inline bool is_class(uint64_t v) { return is_obj(v) && obj_type(v) == ObjType::CLASS; }
 inline bool is_instance(uint64_t v) { return is_obj(v) && obj_type(v) == ObjType::INSTANCE; }
+inline bool is_map(uint64_t v) {
+  return is_obj(v) && obj_type(v) == ObjType::MAP;
+}
 
 // Value equality comparison
 inline bool values_equal(uint64_t a, uint64_t b) {
@@ -1599,6 +1673,8 @@ std::string val_to_string(uint64_t v) {
                 return s + "]";
             }
             case ObjType::RANGE: return "<range>";
+            case ObjType::MAP:
+              return "<map>";
             default: return "<object>";
         }
     }
@@ -1631,10 +1707,12 @@ enum class OpCode : uint8_t {
     OP_BUILTIN_FLOOR, OP_BUILTIN_CEIL, OP_BUILTIN_ROUND,
     OP_BUILTIN_UPPER, OP_BUILTIN_LOWER, OP_BUILTIN_TRIM, OP_BUILTIN_REPLACE,
     OP_BUILTIN_SPLIT, OP_BUILTIN_JOIN, OP_BUILTIN_CONTAINS, OP_BUILTIN_FIND,
-    OP_BUILTIN_STARTSWITH, OP_BUILTIN_ENDSWITH,
+    OP_BUILTIN_STARTSWITH, OP_BUILTIN_ENDSWITH, OP_BUILTIN_KEYS,
     OP_BUILTIN_ENUMERATE, OP_BUILTIN_ZIP, OP_BUILTIN_PRINT, OP_BUILTIN_PRINTLN,
     // Additional essential built-in functions
     OP_BUILTIN_STR, OP_BUILTIN_INT, OP_BUILTIN_FLOAT, OP_BUILTIN_TYPE,
+    // OOP introspection built-ins
+    OP_BUILTIN_ISINSTANCE, OP_BUILTIN_HASATTR, OP_BUILTIN_GETATTR, OP_BUILTIN_SETATTR,
     // Mathematical built-in functions
     OP_BUILTIN_SIN, OP_BUILTIN_COS, OP_BUILTIN_TAN, OP_BUILTIN_ATAN, OP_BUILTIN_EXP, OP_BUILTIN_LOG,
     // High-performance built-in functions
@@ -1659,7 +1737,9 @@ enum class OpCode : uint8_t {
     OP_TRY, OP_CATCH, OP_THROW,
     // Tuple support
     OP_BUILD_TUPLE, OP_UNPACK_TUPLE,
-    
+    // Module import
+    OP_IMPORT,
+
     // ============================================================================
     // FUTURE-PROOF: HARDWARE & EMBEDDED SYSTEMS PRIMITIVES
     // ============================================================================
@@ -1730,7 +1810,7 @@ enum class ObjectType {
 // ASTNode Definition
 enum class TokType {
     IDENTIFIER, NUMBER, STRING, TRUE, FALSE, NONE,
-    SAY, ASK, ACT, CLASS, IS_A, INIT, TRY, CATCH, THROW,
+    SAY, ASK, ACT, CLASS, ABSTRACT, IS_A, INIT, TRY, CATCH, THROW,
     IF, ELSE, WHILE, FOR, IN, REPEAT, IMPORT, RETURN_TOKEN,
     BREAK, CONTINUE,  // Loop control
     PLUS, MINUS, MULTIPLY, DIVIDE, MOD, POWER,
@@ -1768,9 +1848,10 @@ public:
     std::string value;
     std::vector<std::string> params;
     std::string class_name;
+    bool is_abstract = false;
 
     ASTNode(NodeType t, Token tok) : type(t), token(std::move(tok)) {}
-    ASTNode(const ASTNode& other) : type(other.type), token(other.token), value(other.value), params(other.params), class_name(other.class_name) {
+    ASTNode(const ASTNode& other) : type(other.type), token(other.token), value(other.value), params(other.params), class_name(other.class_name), is_abstract(other.is_abstract) {
         children.reserve(other.children.size());
         for (const auto& child : other.children) {
             children.push_back(child ? std::make_unique<ASTNode>(*child) : nullptr);
@@ -1784,6 +1865,7 @@ public:
             value = other.value;
             params = other.params;
             class_name = other.class_name;
+            is_abstract = other.is_abstract;
             children.clear();
             children.reserve(other.children.size());
             for (const auto& child : other.children) {
@@ -1843,6 +1925,8 @@ public:
             std::string name;
             std::map<std::string, Value> methods;
             std::shared_ptr<Value> parent;
+            std::set<std::string> abstract_methods;
+            bool is_abstract = false;
         } class_obj;
         struct Instance {
             std::string class_name;
@@ -1939,6 +2023,71 @@ public:
     }
 };
 
+struct StackFrame {
+    std::string function;
+    size_t line = 0;
+};
+
+class RuntimeError : public std::runtime_error {
+public:
+    std::vector<StackFrame> stack;
+    size_t line = 0;
+
+    RuntimeError(const std::string& msg, size_t ln, std::vector<StackFrame> frames)
+        : std::runtime_error(msg), stack(std::move(frames)), line(ln) {}
+};
+
+static thread_local std::vector<StackFrame> g_call_stack;
+
+static void print_runtime_error(const RuntimeError& err) {
+    std::cerr << "Runtime Error: " << err.what() << std::endl;
+    if (err.line != 0) {
+        std::cerr << "  at <main> line " << err.line << std::endl;
+    }
+    for (auto it = err.stack.rbegin(); it != err.stack.rend(); ++it) {
+        std::cerr << "  at " << it->function;
+        if (it->line != 0) std::cerr << " line " << it->line;
+        std::cerr << std::endl;
+    }
+}
+
+static std::string trim_copy(const std::string& s) {
+    size_t start = 0;
+    size_t end = s.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(s[start]))) ++start;
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    return s.substr(start, end - start);
+}
+
+static bool parse_int64_strict(const std::string& s, int64_t& out) {
+    std::string trimmed = trim_copy(s);
+    if (trimmed.empty()) return false;
+    size_t pos = 0;
+    try {
+        long long v = std::stoll(trimmed, &pos, 10);
+        if (pos != trimmed.size()) return false;
+        out = static_cast<int64_t>(v);
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+static bool parse_double_strict(const std::string& s, double& out) {
+    std::string trimmed = trim_copy(s);
+    if (trimmed.empty()) return false;
+    size_t pos = 0;
+    try {
+        double v = std::stod(trimmed, &pos);
+        if (pos != trimmed.size()) return false;
+        if (!std::isfinite(v)) return false;
+        out = v;
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
 // Environment Definition (placed after Value for complete type)
 class Environment {
 public:
@@ -2018,6 +2167,7 @@ public:
         keywords["say"] = TokType::SAY;
         keywords["act"] = TokType::ACT;
         keywords["class"] = TokType::CLASS;
+        keywords["abstract"] = TokType::ABSTRACT;
         keywords["init"] = TokType::INIT;
         keywords["try"] = TokType::TRY;
         keywords["catch"] = TokType::CATCH;
@@ -2233,6 +2383,13 @@ class Parser {
         if (match({TokType::REPEAT})) return parse_repeat_statement();
         if (match({TokType::RETURN_TOKEN})) return parse_return_statement();
         if (match({TokType::ACT})) return parse_function_definition("act");
+        if (match({TokType::ABSTRACT})) {
+            Token abs_kw = previous();
+            consume(TokType::CLASS, "Expect 'class' after 'abstract'.");
+            auto cls = parse_class_definition(true);
+            cls->token = abs_kw;
+            return cls;
+        }
         if (match({TokType::CLASS})) return parse_class_definition();
         if (match({TokType::IMPORT})) return parse_import_statement();
         if (match({TokType::TRY})) return parse_try_statement();
@@ -2270,6 +2427,13 @@ class Parser {
 
     std::unique_ptr<ASTNode> parse_declaration_or_statement() {
         if (match({TokType::ACT})) return parse_function_definition("act");
+        if (match({TokType::ABSTRACT})) {
+            Token abs_kw = previous();
+            consume(TokType::CLASS, "Expect 'class' after 'abstract'.");
+            auto cls = parse_class_definition(true);
+            cls->token = abs_kw;
+            return cls;
+        }
         if (match({TokType::CLASS})) return parse_class_definition();
         return parse_statement();
     }
@@ -2362,11 +2526,12 @@ class Parser {
         return node;
     }
 
-    std::unique_ptr<ASTNode> parse_class_definition() {
+    std::unique_ptr<ASTNode> parse_class_definition(bool is_abstract_class = false) {
         Token keyword = previous();
         Token name = consume(TokType::IDENTIFIER, "Expect class name.");
         auto node = std::make_unique<ASTNode>(NodeType::CLASS, name);
         node->class_name = name.lexeme;
+        node->is_abstract = is_abstract_class;
 
         if (match({TokType::IS_A})) {
             Token parent_name = consume(TokType::IDENTIFIER, "Expect parent class name after 'is a'.");
@@ -2377,7 +2542,24 @@ class Parser {
         consume(TokType::LBRACE, "Expect '{' before class body.");
 
         while (!check(TokType::RBRACE) && !is_at_end()) {
-            if (match({TokType::ACT})) {
+            if (match({TokType::ABSTRACT})) {
+                consume(TokType::ACT, "Expect 'act' after 'abstract' in class body.");
+                Token method_name = consume(TokType::IDENTIFIER, "Expect method name.");
+                auto method = std::make_unique<ASTNode>(NodeType::FUNCTION, method_name);
+                method->value = method_name.lexeme;
+                method->is_abstract = true;
+                node->is_abstract = true;
+
+                consume(TokType::LPAREN, "Expect '(' after method name.");
+                if (!check(TokType::RPAREN)) {
+                    do {
+                        method->params.push_back(consume(TokType::IDENTIFIER, "Expect parameter name.").lexeme);
+                    } while (match({TokType::COMMA}));
+                }
+                consume(TokType::RPAREN, "Expect ')' after parameters.");
+                consume(TokType::SEMICOLON, "Expect ';' after abstract method declaration.");
+                node->addChild(std::move(method));
+            } else if (match({TokType::ACT})) {
                 auto method = parse_function_definition("act");
                 node->addChild(std::move(method));
             } else if (match({TokType::INIT})) {
@@ -2731,6 +2913,7 @@ public:
                     if (previous().type == TokType::SEMICOLON) break;
                     switch (current().type) {
                         case TokType::CLASS:
+                        case TokType::ABSTRACT:
                         case TokType::ACT:
                         case TokType::FOR:
                         case TokType::IF:
@@ -2766,6 +2949,206 @@ struct BreakException : public std::exception {
 struct ContinueException : public std::exception {
     const char* what() const noexcept override { return "continue"; }
 };
+
+namespace http_bindings {
+Value builtin_http_get(const std::vector<Value> &args);
+Value builtin_http_post(const std::vector<Value> &args);
+Value builtin_http_put(const std::vector<Value> &args);
+Value builtin_http_patch(const std::vector<Value> &args);
+Value builtin_http_delete(const std::vector<Value> &args);
+Value builtin_http_head(const std::vector<Value> &args);
+Value builtin_http_request(const std::vector<Value> &args);
+Value builtin_http_set_timeout(const std::vector<Value> &args);
+Value builtin_http_set_verify_ssl(const std::vector<Value> &args);
+Value create_http_module();
+} // namespace http_bindings
+
+namespace os_bindings {
+Value builtin_os_name(const std::vector<Value> &args);
+Value builtin_os_sep(const std::vector<Value> &args);
+Value builtin_os_cwd(const std::vector<Value> &args);
+Value builtin_os_chdir(const std::vector<Value> &args);
+Value builtin_os_listdir(const std::vector<Value> &args);
+Value builtin_os_exists(const std::vector<Value> &args);
+Value builtin_os_is_file(const std::vector<Value> &args);
+Value builtin_os_is_dir(const std::vector<Value> &args);
+Value builtin_os_mkdir(const std::vector<Value> &args);
+Value builtin_os_remove(const std::vector<Value> &args);
+Value builtin_os_rmdir(const std::vector<Value> &args);
+Value builtin_os_rename(const std::vector<Value> &args);
+Value builtin_os_abspath(const std::vector<Value> &args);
+Value builtin_os_getenv(const std::vector<Value> &args);
+Value builtin_os_setenv(const std::vector<Value> &args);
+Value builtin_os_unsetenv(const std::vector<Value> &args);
+Value create_os_module();
+} // namespace os_bindings
+
+namespace fs_bindings {
+Value builtin_fs_exists(const std::vector<Value>& args);
+Value builtin_fs_is_file(const std::vector<Value>& args);
+Value builtin_fs_is_dir(const std::vector<Value>& args);
+Value builtin_fs_mkdir(const std::vector<Value>& args);
+Value builtin_fs_remove(const std::vector<Value>& args);
+Value builtin_fs_rmdir(const std::vector<Value>& args);
+Value builtin_fs_listdir(const std::vector<Value>& args);
+Value builtin_fs_read_text(const std::vector<Value>& args);
+Value builtin_fs_write_text(const std::vector<Value>& args);
+Value builtin_fs_append_text(const std::vector<Value>& args);
+Value builtin_fs_copy(const std::vector<Value>& args);
+Value builtin_fs_move(const std::vector<Value>& args);
+Value builtin_fs_abspath(const std::vector<Value>& args);
+Value create_fs_module();
+}
+
+namespace path_bindings {
+Value builtin_path_join(const std::vector<Value>& args);
+Value builtin_path_basename(const std::vector<Value>& args);
+Value builtin_path_dirname(const std::vector<Value>& args);
+Value builtin_path_ext(const std::vector<Value>& args);
+Value builtin_path_stem(const std::vector<Value>& args);
+Value builtin_path_norm(const std::vector<Value>& args);
+Value builtin_path_abspath(const std::vector<Value>& args);
+Value builtin_path_exists(const std::vector<Value>& args);
+Value builtin_path_is_file(const std::vector<Value>& args);
+Value builtin_path_is_dir(const std::vector<Value>& args);
+Value builtin_path_read_text(const std::vector<Value>& args);
+Value builtin_path_write_text(const std::vector<Value>& args);
+Value builtin_path_listdir(const std::vector<Value>& args);
+Value builtin_path_mkdir(const std::vector<Value>& args);
+Value builtin_path_remove(const std::vector<Value>& args);
+Value builtin_path_rmdir(const std::vector<Value>& args);
+Value create_path_module();
+}
+
+namespace process_bindings {
+Value builtin_process_getpid(const std::vector<Value>& args);
+Value builtin_process_run(const std::vector<Value>& args);
+Value builtin_process_cwd(const std::vector<Value>& args);
+Value builtin_process_chdir(const std::vector<Value>& args);
+Value builtin_process_getenv(const std::vector<Value>& args);
+Value builtin_process_setenv(const std::vector<Value>& args);
+Value builtin_process_unsetenv(const std::vector<Value>& args);
+Value create_process_module();
+}
+
+namespace json_bindings {
+Value builtin_json_parse(const std::vector<Value>& args);
+Value builtin_json_stringify(const std::vector<Value>& args);
+Value create_json_module();
+}
+
+namespace url_bindings {
+Value builtin_url_parse(const std::vector<Value>& args);
+Value builtin_url_encode(const std::vector<Value>& args);
+Value builtin_url_decode(const std::vector<Value>& args);
+Value create_url_module();
+}
+
+namespace net_bindings {
+Value builtin_net_tcp_connect(const std::vector<Value>& args);
+Value builtin_net_tcp_listen(const std::vector<Value>& args);
+Value builtin_net_tcp_accept(const std::vector<Value>& args);
+Value builtin_net_tcp_try_accept(const std::vector<Value>& args);
+Value builtin_net_set_nonblocking(const std::vector<Value>& args);
+Value builtin_net_tcp_send(const std::vector<Value>& args);
+Value builtin_net_tcp_try_send(const std::vector<Value>& args);
+Value builtin_net_tcp_recv(const std::vector<Value>& args);
+Value builtin_net_tcp_try_recv(const std::vector<Value>& args);
+Value builtin_net_tcp_close(const std::vector<Value>& args);
+Value builtin_net_udp_bind(const std::vector<Value>& args);
+Value builtin_net_udp_sendto(const std::vector<Value>& args);
+Value builtin_net_udp_recvfrom(const std::vector<Value>& args);
+Value builtin_net_udp_close(const std::vector<Value>& args);
+Value builtin_net_dns_lookup(const std::vector<Value>& args);
+Value create_net_module();
+}
+
+namespace crypto_bindings {
+Value builtin_crypto_sha256(const std::vector<Value>& args);
+Value builtin_crypto_sha512(const std::vector<Value>& args);
+Value builtin_crypto_hmac_sha256(const std::vector<Value>& args);
+Value builtin_crypto_random_bytes(const std::vector<Value>& args);
+Value builtin_crypto_hex_encode(const std::vector<Value>& args);
+Value builtin_crypto_hex_decode(const std::vector<Value>& args);
+Value builtin_crypto_base64_encode(const std::vector<Value>& args);
+Value builtin_crypto_base64_decode(const std::vector<Value>& args);
+Value create_crypto_module();
+}
+
+namespace time_bindings {
+Value builtin_time_now_utc(const std::vector<Value>& args);
+Value builtin_time_now_local(const std::vector<Value>& args);
+Value builtin_time_format(const std::vector<Value>& args);
+Value builtin_time_parse(const std::vector<Value>& args);
+Value builtin_time_sleep_ms(const std::vector<Value>& args);
+Value builtin_time_epoch_ms(const std::vector<Value>& args);
+Value create_time_module();
+}
+
+namespace log_bindings {
+Value builtin_log_set_level(const std::vector<Value>& args);
+Value builtin_log_set_output(const std::vector<Value>& args);
+Value builtin_log_set_json(const std::vector<Value>& args);
+Value builtin_log_log(const std::vector<Value>& args);
+Value builtin_log_debug(const std::vector<Value>& args);
+Value builtin_log_info(const std::vector<Value>& args);
+Value builtin_log_warn(const std::vector<Value>& args);
+Value builtin_log_error(const std::vector<Value>& args);
+Value builtin_log_flush(const std::vector<Value>& args);
+Value create_log_module();
+}
+
+namespace config_bindings {
+Value builtin_config_load_env(const std::vector<Value>& args);
+Value builtin_config_get(const std::vector<Value>& args);
+Value builtin_config_set(const std::vector<Value>& args);
+Value builtin_config_get_int(const std::vector<Value>& args);
+Value builtin_config_get_float(const std::vector<Value>& args);
+Value builtin_config_get_bool(const std::vector<Value>& args);
+Value builtin_config_has(const std::vector<Value>& args);
+Value create_config_module();
+}
+
+namespace input_bindings {
+Value builtin_input_enable_raw(const std::vector<Value>& args);
+Value builtin_input_disable_raw(const std::vector<Value>& args);
+Value builtin_input_key_available(const std::vector<Value>& args);
+Value builtin_input_poll(const std::vector<Value>& args);
+Value builtin_input_read_key(const std::vector<Value>& args);
+Value create_input_module();
+}
+
+namespace thread_bindings {
+Value builtin_thread_spawn(const std::vector<Value>& args);
+Value builtin_thread_join(const std::vector<Value>& args);
+Value builtin_thread_is_done(const std::vector<Value>& args);
+Value builtin_thread_sleep(const std::vector<Value>& args);
+Value create_thread_module();
+}
+
+namespace channel_bindings {
+Value builtin_channel_create(const std::vector<Value>& args);
+Value builtin_channel_send(const std::vector<Value>& args);
+Value builtin_channel_recv(const std::vector<Value>& args);
+Value builtin_channel_try_recv(const std::vector<Value>& args);
+Value builtin_channel_close(const std::vector<Value>& args);
+Value create_channel_module();
+}
+
+namespace async_bindings {
+Value builtin_async_spawn(const std::vector<Value>& args);
+Value builtin_async_sleep(const std::vector<Value>& args);
+Value builtin_async_tcp_recv(const std::vector<Value>& args);
+Value builtin_async_tcp_send(const std::vector<Value>& args);
+Value builtin_async_tick(const std::vector<Value>& args);
+Value builtin_async_done(const std::vector<Value>& args);
+Value builtin_async_status(const std::vector<Value>& args);
+Value builtin_async_result(const std::vector<Value>& args);
+Value builtin_async_cancel(const std::vector<Value>& args);
+Value builtin_async_pending(const std::vector<Value>& args);
+Value builtin_async_await(const std::vector<Value>& args);
+Value create_async_module();
+}
 
 // Interpreter
 class Interpreter {
@@ -2930,7 +3313,13 @@ class Interpreter {
         try {
             if (arg.type == ObjectType::INTEGER) return arg;
             if (arg.type == ObjectType::FLOAT) return Value(static_cast<long>(arg.data.floating));
-            if (arg.type == ObjectType::STRING) return Value(std::stol(arg.data.string));
+            if (arg.type == ObjectType::STRING) {
+                int64_t parsed = 0;
+                if (!parse_int64_strict(arg.data.string, parsed)) {
+                    throw std::runtime_error("Cannot convert '" + arg.to_string() + "' to integer.");
+                }
+                return Value(static_cast<long>(parsed));
+            }
             if (arg.type == ObjectType::BOOLEAN) return Value(arg.data.boolean ? 1L : 0L);
         } catch (const std::exception&) {
             throw std::runtime_error("Cannot convert '" + arg.to_string() + "' to integer.");
@@ -2944,7 +3333,13 @@ class Interpreter {
         try {
             if (arg.type == ObjectType::FLOAT) return arg;
             if (arg.type == ObjectType::INTEGER) return Value(static_cast<double>(arg.data.integer));
-            if (arg.type == ObjectType::STRING) return Value(std::stod(arg.data.string));
+            if (arg.type == ObjectType::STRING) {
+                double parsed = 0.0;
+                if (!parse_double_strict(arg.data.string, parsed)) {
+                    throw std::runtime_error("Cannot convert '" + arg.to_string() + "' to float.");
+                }
+                return Value(parsed);
+            }
             if (arg.type == ObjectType::BOOLEAN) return Value(arg.data.boolean ? 1.0 : 0.0);
         } catch (const std::exception&) {
             throw std::runtime_error("Cannot convert '" + arg.to_string() + "' to float.");
@@ -3270,6 +3665,16 @@ class Interpreter {
         const std::string& suffix = args[1].data.string;
         if (suffix.size() > str.size()) return Value(false);
         return Value(str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
+    }
+
+    Value builtin_keys(const std::vector<Value>& args) {
+        if (args.size() != 1) throw std::runtime_error("keys() expects 1 argument.");
+        if (args[0].type != ObjectType::MAP) throw std::runtime_error("keys() expects a map.");
+        Value out(ObjectType::LIST);
+        for (const auto& kv : args[0].data.map) {
+            out.data.list.push_back(Value(kv.first));
+        }
+        return out;
     }
 
     // Built-in find/index functions
@@ -3765,7 +4170,9 @@ public:
         define_builtin("contains", {"container", "item"});
         define_builtin("startswith", {"str", "prefix"});
         define_builtin("endswith", {"str", "suffix"});
+        define_builtin("keys", {"map"});
         define_builtin("find", {"container", "item"});
+        define_builtin("await", {"task", "timeout_ms"});
 
         // ============================================================================
         // FUTURE-PROOF: HARDWARE & EMBEDDED SYSTEMS PRIMITIVES
@@ -3821,13 +4228,82 @@ public:
         
         // Register math module
         global->define("math", math_module);
+
+        // Register HTTP module
+        Value http_module = http_bindings::create_http_module();
+        global->define("http", http_module);
+        modules_cache["http"] = http_module;
+
+        // Register OS module
+        Value os_module = os_bindings::create_os_module();
+        global->define("os", os_module);
+        modules_cache["os"] = os_module;
+
+        // Register additional native modules
+        Value fs_module = fs_bindings::create_fs_module();
+        global->define("fs", fs_module);
+        modules_cache["fs"] = fs_module;
+
+        Value path_module = path_bindings::create_path_module();
+        global->define("path", path_module);
+        modules_cache["path"] = path_module;
+
+        Value process_module = process_bindings::create_process_module();
+        global->define("process", process_module);
+        modules_cache["process"] = process_module;
+
+        Value json_module = json_bindings::create_json_module();
+        global->define("json", json_module);
+        modules_cache["json"] = json_module;
+
+        Value url_module = url_bindings::create_url_module();
+        global->define("url", url_module);
+        modules_cache["url"] = url_module;
+
+        Value net_module = net_bindings::create_net_module();
+        global->define("net", net_module);
+        modules_cache["net"] = net_module;
+
+        Value thread_module = thread_bindings::create_thread_module();
+        global->define("thread", thread_module);
+        modules_cache["thread"] = thread_module;
+
+        Value channel_module = channel_bindings::create_channel_module();
+        global->define("channel", channel_module);
+        modules_cache["channel"] = channel_module;
+
+        Value async_module = async_bindings::create_async_module();
+        global->define("async", async_module);
+        modules_cache["async"] = async_module;
+
+        Value crypto_module = crypto_bindings::create_crypto_module();
+        global->define("crypto", crypto_module);
+        modules_cache["crypto"] = crypto_module;
+
+        Value time_module = time_bindings::create_time_module();
+        global->define("datetime", time_module);
+        modules_cache["datetime"] = time_module;
+
+        Value log_module = log_bindings::create_log_module();
+        global->define("log", log_module);
+        modules_cache["log"] = log_module;
+
+        Value config_module = config_bindings::create_config_module();
+        global->define("config", config_module);
+        modules_cache["config"] = config_module;
+
+        Value input_module = input_bindings::create_input_module();
+        global->define("input", input_module);
+        modules_cache["input"] = input_module;
     }
 
     void interpret(ASTNode* node) {
         try {
             evaluate(node, global, false);
+        } catch (const RuntimeError& e) {
+            print_runtime_error(e);
         } catch (const std::exception& e) {
-            std::cerr << "Runtime Error: " << e.what() << std::endl;
+            print_runtime_error(RuntimeError(e.what(), 0, g_call_stack));
         }
     }
 
@@ -3859,7 +4335,8 @@ public:
 
     void run_repl() {
         std::cout << "\n";
-        std::cout << "  Levython REPL v1.0.1\n";
+        std::cout << "  Levython REPL v1.0.2\n";
+        std::cout << "  Be better than yesterday\n";
         std::cout << "  Type 'help' for commands, 'exit' to quit\n";
         std::cout << "\n";
         
@@ -3874,9 +4351,9 @@ public:
         while (true) {
             // Prompt
             if (in_multiline) {
-                std::cout << "... ";
+                std::cout << "levy... ";
             } else {
-                std::cout << ">>> ";
+                std::cout << "levy>>> ";
             }
             
             std::string line;
@@ -3940,7 +4417,8 @@ public:
                 }
                 
                 if (line == "version") {
-                    std::cout << "  Levython 1.0.1\n";
+                    std::cout << "  Levython 1.0.2\n";
+                    std::cout << "  Motto: Be better than yesterday\n";
                     std::cout << "  JIT: x86-64 native compilation\n";
                     std::cout << "  VM: FastVM with NaN-boxing\n";
                     continue;
@@ -3997,7 +4475,7 @@ public:
             execute(line, "<repl>");
         }
         
-        std::cout << "\nGoodbye!\n";
+        std::cout << "\nGoodbye! Be better than yesterday.\n";
     }
 
 private:
@@ -4011,13 +4489,26 @@ void execute(const std::string& source, const std::string& context_name) {
         if (context_name == "<repl>" && result.type != ObjectType::NONE) {
             std::cout << "=> " << result.to_string() << std::endl;
         }
+    } catch (const RuntimeError& e) {
+        print_runtime_error(e);
     } catch (const std::runtime_error& e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        print_runtime_error(RuntimeError(e.what(), 0, g_call_stack));
     }
 }
 
 Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) {
     if (!node) return Value();
+    struct CallFrameGuard {
+        bool active = false;
+        CallFrameGuard(const std::string& fn, size_t line) : active(true) {
+            g_call_stack.push_back({fn, line});
+        }
+        ~CallFrameGuard() {
+            if (active && !g_call_stack.empty()) g_call_stack.pop_back();
+        }
+        CallFrameGuard(const CallFrameGuard&) = delete;
+        CallFrameGuard& operator=(const CallFrameGuard&) = delete;
+    };
     try {
         switch (node->type) {
             case NodeType::PROGRAM: {
@@ -4105,7 +4596,11 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                     if (container.type == ObjectType::LIST && index.type == ObjectType::INTEGER) {
                         current = container.data.list[index.data.integer];
                     } else if (container.type == ObjectType::MAP && index.type == ObjectType::STRING) {
-                        current = container.data.map[index.data.string];
+                        auto it = container.data.map.find(index.data.string);
+                        if (it == container.data.map.end()) {
+                            throw std::runtime_error("Key not found: " + index.data.string);
+                        }
+                        current = it->second;
                     } else {
                         throw std::runtime_error("Invalid index type for compound assignment.");
                     }
@@ -4295,9 +4790,12 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
             case NodeType::CLASS: {
                 Value class_val(ObjectType::CLASS);
                 class_val.data.class_obj.name = node->class_name;
+                class_val.data.class_obj.is_abstract = node->is_abstract;
                 
                 // Handle inheritance
-                if (node->children[0] && node->children[0]->type == NodeType::VARIABLE) {
+                bool has_parent = !node->children.empty() && node->children[0] &&
+                                  node->children[0]->type == NodeType::VARIABLE;
+                if (has_parent) {
                     Value parent_val = evaluate(node->children[0].get(), env, is_method);
                     if (parent_val.type != ObjectType::CLASS) {
                         throw std::runtime_error("Parent must be a class.");
@@ -4306,10 +4804,14 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                 }
 
                 // Process methods
-                size_t start_idx = (node->children[0] && node->children[0]->type == NodeType::VARIABLE) ? 1 : 0;
+                size_t start_idx = has_parent ? 1 : 0;
                 for (size_t i = start_idx; i < node->children.size(); ++i) {
                     ASTNode* method_node = node->children[i].get();
                     if (method_node->type == NodeType::FUNCTION) {
+                        if (method_node->is_abstract) {
+                            class_val.data.class_obj.abstract_methods.insert(method_node->value);
+                            continue;
+                        }
                         Value method_func(ObjectType::FUNCTION);
                         method_func.data.function = Value::Data::Function(
                             method_node->params,
@@ -4317,6 +4819,7 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                             env
                         );
                         class_val.data.class_obj.methods[method_node->value] = method_func;
+                        class_val.data.class_obj.abstract_methods.erase(method_node->value);
                     }
                 }
 
@@ -4331,6 +4834,14 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                 for (size_t i = 1; i < node->children.size(); ++i) {
                     args.push_back(evaluate(node->children[i].get(), env, is_method));
                 }
+
+                std::string call_name = "<call>";
+                if (calleeNode->type == NodeType::VARIABLE) {
+                    call_name = calleeNode->value;
+                } else if (calleeNode->type == NodeType::GET_ATTR) {
+                    call_name = calleeNode->value;
+                }
+                CallFrameGuard guard(call_name, node->token.line);
 
                 if (calleeNode->type == NodeType::GET_ATTR) {
                     auto* getN = static_cast<ASTNode*>(calleeNode);
@@ -4368,9 +4879,33 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
                 }
 
                 if (callee.type == ObjectType::CLASS) {
+                    std::set<std::string> missing;
+                    std::function<void(const std::shared_ptr<Value>&)> collect_missing;
+                    collect_missing = [&](const std::shared_ptr<Value>& cls) {
+                        if (!cls || cls->type != ObjectType::CLASS) return;
+                        if (cls->data.class_obj.parent) collect_missing(cls->data.class_obj.parent);
+                        for (const auto& name : cls->data.class_obj.abstract_methods) {
+                            missing.insert(name);
+                        }
+                        for (const auto& pair : cls->data.class_obj.methods) {
+                            missing.erase(pair.first);
+                        }
+                    };
+
+                    auto class_ref = std::make_shared<Value>(callee);
+                    collect_missing(class_ref);
+                    if (callee.data.class_obj.is_abstract || !missing.empty()) {
+                        std::string msg = "Cannot instantiate abstract class '" +
+                                          callee.data.class_obj.name + "'";
+                        if (!missing.empty()) {
+                            msg += " (missing implementation for '" + *missing.begin() + "')";
+                        }
+                        throw std::runtime_error(msg);
+                    }
+
                     Value instVal(ObjectType::INSTANCE);
                     instVal.data.instance.class_name = callee.data.class_obj.name;
-                    instVal.data.instance.class_ref = std::make_shared<Value>(callee);
+                    instVal.data.instance.class_ref = class_ref;
                     
                     // Handle parent class initialization first if it exists
                     if (callee.data.class_obj.parent) {
@@ -4653,6 +5188,10 @@ Value evaluate(ASTNode* node, std::shared_ptr<Environment> env, bool is_method) 
         }
     } catch (const ReturnValue& ret) {
         throw ret;
+    } catch (const RuntimeError&) {
+        throw;
+    } catch (const std::runtime_error& e) {
+        throw RuntimeError(e.what(), node->token.line, g_call_stack);
     }
     return Value();
 }
@@ -4706,7 +5245,9 @@ Value Interpreter::call_method(Value& instance,
         if (name == "contains") return builtin_contains(args);
         if (name == "startswith") return builtin_startswith(args);
         if (name == "endswith") return builtin_endswith(args);
+        if (name == "keys") return builtin_keys(args);
         if (name == "find") return builtin_find(args);
+        if (name == "await") return async_bindings::builtin_async_await(args);
         
         // ============================================================================
         // FUTURE-PROOF: HARDWARE & EMBEDDED SYSTEMS PRIMITIVES
@@ -4740,6 +5281,156 @@ Value Interpreter::call_method(Value& instance,
         // ============================================================================
         if (name == "simd_add_f32") return builtin_simd_add_f32(args);
         if (name == "simd_mul_f32") return builtin_simd_mul_f32(args);
+        
+        // HTTP built-ins
+        if (name == "http_get") return http_bindings::builtin_http_get(args);
+        if (name == "http_post") return http_bindings::builtin_http_post(args);
+        if (name == "http_put") return http_bindings::builtin_http_put(args);
+        if (name == "http_patch") return http_bindings::builtin_http_patch(args);
+        if (name == "http_delete") return http_bindings::builtin_http_delete(args);
+        if (name == "http_head") return http_bindings::builtin_http_head(args);
+        if (name == "http_request") return http_bindings::builtin_http_request(args);
+        if (name == "http_set_timeout") return http_bindings::builtin_http_set_timeout(args);
+        if (name == "http_set_verify_ssl")
+            return http_bindings::builtin_http_set_verify_ssl(args);
+        if (name == "os_name") return os_bindings::builtin_os_name(args);
+        if (name == "os_sep") return os_bindings::builtin_os_sep(args);
+        if (name == "os_cwd") return os_bindings::builtin_os_cwd(args);
+        if (name == "os_chdir") return os_bindings::builtin_os_chdir(args);
+        if (name == "os_listdir") return os_bindings::builtin_os_listdir(args);
+        if (name == "os_exists") return os_bindings::builtin_os_exists(args);
+        if (name == "os_is_file") return os_bindings::builtin_os_is_file(args);
+        if (name == "os_is_dir") return os_bindings::builtin_os_is_dir(args);
+        if (name == "os_mkdir") return os_bindings::builtin_os_mkdir(args);
+        if (name == "os_remove") return os_bindings::builtin_os_remove(args);
+        if (name == "os_rmdir") return os_bindings::builtin_os_rmdir(args);
+        if (name == "os_rename") return os_bindings::builtin_os_rename(args);
+        if (name == "os_abspath") return os_bindings::builtin_os_abspath(args);
+        if (name == "os_getenv") return os_bindings::builtin_os_getenv(args);
+        if (name == "os_setenv") return os_bindings::builtin_os_setenv(args);
+        if (name == "os_unsetenv") return os_bindings::builtin_os_unsetenv(args);
+        if (name == "fs_exists") return fs_bindings::builtin_fs_exists(args);
+        if (name == "fs_is_file") return fs_bindings::builtin_fs_is_file(args);
+        if (name == "fs_is_dir") return fs_bindings::builtin_fs_is_dir(args);
+        if (name == "fs_mkdir") return fs_bindings::builtin_fs_mkdir(args);
+        if (name == "fs_remove") return fs_bindings::builtin_fs_remove(args);
+        if (name == "fs_rmdir") return fs_bindings::builtin_fs_rmdir(args);
+        if (name == "fs_listdir") return fs_bindings::builtin_fs_listdir(args);
+        if (name == "fs_read_text") return fs_bindings::builtin_fs_read_text(args);
+        if (name == "fs_write_text") return fs_bindings::builtin_fs_write_text(args);
+        if (name == "fs_append_text") return fs_bindings::builtin_fs_append_text(args);
+        if (name == "fs_copy") return fs_bindings::builtin_fs_copy(args);
+        if (name == "fs_move") return fs_bindings::builtin_fs_move(args);
+        if (name == "fs_abspath") return fs_bindings::builtin_fs_abspath(args);
+        if (name == "path_join") return path_bindings::builtin_path_join(args);
+        if (name == "path_basename") return path_bindings::builtin_path_basename(args);
+        if (name == "path_dirname") return path_bindings::builtin_path_dirname(args);
+        if (name == "path_ext") return path_bindings::builtin_path_ext(args);
+        if (name == "path_stem") return path_bindings::builtin_path_stem(args);
+        if (name == "path_norm") return path_bindings::builtin_path_norm(args);
+        if (name == "path_abspath") return path_bindings::builtin_path_abspath(args);
+        if (name == "path_exists") return path_bindings::builtin_path_exists(args);
+        if (name == "path_is_file") return path_bindings::builtin_path_is_file(args);
+        if (name == "path_is_dir") return path_bindings::builtin_path_is_dir(args);
+        if (name == "path_read_text") return path_bindings::builtin_path_read_text(args);
+        if (name == "path_write_text") return path_bindings::builtin_path_write_text(args);
+        if (name == "path_listdir") return path_bindings::builtin_path_listdir(args);
+        if (name == "path_mkdir") return path_bindings::builtin_path_mkdir(args);
+        if (name == "path_remove") return path_bindings::builtin_path_remove(args);
+        if (name == "path_rmdir") return path_bindings::builtin_path_rmdir(args);
+        if (name == "process_getpid") return process_bindings::builtin_process_getpid(args);
+        if (name == "process_run") return process_bindings::builtin_process_run(args);
+        if (name == "process_cwd") return process_bindings::builtin_process_cwd(args);
+        if (name == "process_chdir") return process_bindings::builtin_process_chdir(args);
+        if (name == "process_getenv") return process_bindings::builtin_process_getenv(args);
+        if (name == "process_setenv") return process_bindings::builtin_process_setenv(args);
+        if (name == "process_unsetenv") return process_bindings::builtin_process_unsetenv(args);
+        if (name == "crypto_sha256") return crypto_bindings::builtin_crypto_sha256(args);
+        if (name == "crypto_sha512") return crypto_bindings::builtin_crypto_sha512(args);
+        if (name == "crypto_hmac_sha256") return crypto_bindings::builtin_crypto_hmac_sha256(args);
+        if (name == "crypto_random_bytes") return crypto_bindings::builtin_crypto_random_bytes(args);
+        if (name == "crypto_hex_encode") return crypto_bindings::builtin_crypto_hex_encode(args);
+        if (name == "crypto_hex_decode") return crypto_bindings::builtin_crypto_hex_decode(args);
+        if (name == "crypto_base64_encode") return crypto_bindings::builtin_crypto_base64_encode(args);
+        if (name == "crypto_base64_decode") return crypto_bindings::builtin_crypto_base64_decode(args);
+        if (name == "time_now_utc") return time_bindings::builtin_time_now_utc(args);
+        if (name == "time_now_local") return time_bindings::builtin_time_now_local(args);
+        if (name == "time_format") return time_bindings::builtin_time_format(args);
+        if (name == "time_parse") return time_bindings::builtin_time_parse(args);
+        if (name == "time_sleep_ms") return time_bindings::builtin_time_sleep_ms(args);
+        if (name == "time_epoch_ms") return time_bindings::builtin_time_epoch_ms(args);
+        if (name == "log_set_level") return log_bindings::builtin_log_set_level(args);
+        if (name == "log_set_output") return log_bindings::builtin_log_set_output(args);
+        if (name == "log_set_json") return log_bindings::builtin_log_set_json(args);
+        if (name == "log_log") return log_bindings::builtin_log_log(args);
+        if (name == "log_debug") return log_bindings::builtin_log_debug(args);
+        if (name == "log_info") return log_bindings::builtin_log_info(args);
+        if (name == "log_warn") return log_bindings::builtin_log_warn(args);
+        if (name == "log_error") return log_bindings::builtin_log_error(args);
+        if (name == "log_flush") return log_bindings::builtin_log_flush(args);
+        if (name == "config_load_env") return config_bindings::builtin_config_load_env(args);
+        if (name == "config_get") return config_bindings::builtin_config_get(args);
+        if (name == "config_set") return config_bindings::builtin_config_set(args);
+        if (name == "config_get_int") return config_bindings::builtin_config_get_int(args);
+        if (name == "config_get_float") return config_bindings::builtin_config_get_float(args);
+        if (name == "config_get_bool") return config_bindings::builtin_config_get_bool(args);
+        if (name == "config_has") return config_bindings::builtin_config_has(args);
+        if (name == "input_enable_raw") return input_bindings::builtin_input_enable_raw(args);
+        if (name == "input_disable_raw") return input_bindings::builtin_input_disable_raw(args);
+        if (name == "input_key_available") return input_bindings::builtin_input_key_available(args);
+        if (name == "input_poll") return input_bindings::builtin_input_poll(args);
+        if (name == "input_read_key") return input_bindings::builtin_input_read_key(args);
+        if (name == "json_parse") return json_bindings::builtin_json_parse(args);
+        if (name == "json_stringify") return json_bindings::builtin_json_stringify(args);
+        if (name == "url_parse") return url_bindings::builtin_url_parse(args);
+        if (name == "url_encode") return url_bindings::builtin_url_encode(args);
+        if (name == "url_decode") return url_bindings::builtin_url_decode(args);
+        if (name == "net_tcp_connect") return net_bindings::builtin_net_tcp_connect(args);
+        if (name == "net_tcp_listen") return net_bindings::builtin_net_tcp_listen(args);
+        if (name == "net_tcp_accept") return net_bindings::builtin_net_tcp_accept(args);
+        if (name == "net_tcp_try_accept") return net_bindings::builtin_net_tcp_try_accept(args);
+        if (name == "net_set_nonblocking") return net_bindings::builtin_net_set_nonblocking(args);
+        if (name == "net_tcp_send") return net_bindings::builtin_net_tcp_send(args);
+        if (name == "net_tcp_try_send") return net_bindings::builtin_net_tcp_try_send(args);
+        if (name == "net_tcp_recv") return net_bindings::builtin_net_tcp_recv(args);
+        if (name == "net_tcp_try_recv") return net_bindings::builtin_net_tcp_try_recv(args);
+        if (name == "net_tcp_close") return net_bindings::builtin_net_tcp_close(args);
+        if (name == "net_udp_bind") return net_bindings::builtin_net_udp_bind(args);
+        if (name == "net_udp_sendto") return net_bindings::builtin_net_udp_sendto(args);
+        if (name == "net_udp_recvfrom") return net_bindings::builtin_net_udp_recvfrom(args);
+        if (name == "net_udp_close") return net_bindings::builtin_net_udp_close(args);
+        if (name == "net_dns_lookup") return net_bindings::builtin_net_dns_lookup(args);
+        if (name == "thread_spawn") return thread_bindings::builtin_thread_spawn(args);
+        if (name == "thread_join") return thread_bindings::builtin_thread_join(args);
+        if (name == "thread_is_done") return thread_bindings::builtin_thread_is_done(args);
+        if (name == "thread_sleep") return thread_bindings::builtin_thread_sleep(args);
+        if (name == "channel_create") return channel_bindings::builtin_channel_create(args);
+        if (name == "channel_send") return channel_bindings::builtin_channel_send(args);
+        if (name == "channel_recv") return channel_bindings::builtin_channel_recv(args);
+        if (name == "channel_try_recv") return channel_bindings::builtin_channel_try_recv(args);
+        if (name == "channel_close") return channel_bindings::builtin_channel_close(args);
+        if (name == "async_spawn") return async_bindings::builtin_async_spawn(args);
+        if (name == "async_sleep") return async_bindings::builtin_async_sleep(args);
+        if (name == "async_tcp_recv") return async_bindings::builtin_async_tcp_recv(args);
+        if (name == "async_tcp_send") return async_bindings::builtin_async_tcp_send(args);
+        if (name == "async_tick") return async_bindings::builtin_async_tick(args);
+        if (name == "async_done") return async_bindings::builtin_async_done(args);
+        if (name == "async_status") return async_bindings::builtin_async_status(args);
+        if (name == "async_result") return async_bindings::builtin_async_result(args);
+        if (name == "async_cancel") return async_bindings::builtin_async_cancel(args);
+        if (name == "async_pending") return async_bindings::builtin_async_pending(args);
+        if (name == "async_await") return async_bindings::builtin_async_await(args);
+        if (name == "async_spawn") return async_bindings::builtin_async_spawn(args);
+        if (name == "async_sleep") return async_bindings::builtin_async_sleep(args);
+        if (name == "async_tcp_recv") return async_bindings::builtin_async_tcp_recv(args);
+        if (name == "async_tcp_send") return async_bindings::builtin_async_tcp_send(args);
+        if (name == "async_tick") return async_bindings::builtin_async_tick(args);
+        if (name == "async_done") return async_bindings::builtin_async_done(args);
+        if (name == "async_status") return async_bindings::builtin_async_status(args);
+        if (name == "async_result") return async_bindings::builtin_async_result(args);
+        if (name == "async_cancel") return async_bindings::builtin_async_cancel(args);
+        if (name == "async_pending") return async_bindings::builtin_async_pending(args);
+        if (name == "async_await") return async_bindings::builtin_async_await(args);
         
         throw std::runtime_error("Unknown built-in function: " + name);
     }
@@ -4790,6 +5481,2560 @@ Value Interpreter::call_method(Value& instance,
 
     return result;
 }
+
+// ============================================================================
+// HTTP BINDINGS - HTTP Module Integration
+// ============================================================================
+namespace http_bindings {
+
+class HttpModuleState {
+private:
+  levython::http::HttpClient client_instance;
+  HttpModuleState() {}
+
+public:
+  static HttpModuleState &get_instance() {
+    static HttpModuleState instance;
+    return instance;
+  }
+
+  levython::http::HttpClient &client() { return client_instance; }
+};
+
+std::string value_to_string(const Value &v) {
+  if (v.type == ObjectType::STRING) {
+    return v.data.string;
+  }
+  return v.to_string();
+}
+
+int value_to_int(const Value &v) {
+  if (v.type == ObjectType::INTEGER) {
+    return static_cast<int>(v.data.integer);
+  }
+  if (v.type == ObjectType::FLOAT) {
+    return static_cast<int>(v.data.floating);
+  }
+  throw std::runtime_error("Expected integer value");
+}
+
+bool value_to_bool(const Value &v) {
+  if (v.type == ObjectType::BOOLEAN) {
+    return v.data.boolean;
+  }
+  if (v.type == ObjectType::INTEGER) {
+    return v.data.integer != 0;
+  }
+  if (v.type == ObjectType::FLOAT) {
+    return v.data.floating != 0.0;
+  }
+  return v.is_truthy();
+}
+
+std::map<std::string, std::string> value_to_headers(const Value &v) {
+  std::map<std::string, std::string> headers;
+  if (v.type == ObjectType::MAP) {
+    for (const auto &pair : v.data.map) {
+      headers[pair.first] = value_to_string(pair.second);
+    }
+  }
+  return headers;
+}
+
+levython::http::HttpMethod parse_http_method(const std::string &method) {
+  std::string upper = method;
+  std::transform(upper.begin(), upper.end(), upper.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+
+  if (upper == "GET")
+    return levython::http::HttpMethod::GET;
+  if (upper == "POST")
+    return levython::http::HttpMethod::POST;
+  if (upper == "PUT")
+    return levython::http::HttpMethod::PUT;
+  if (upper == "PATCH")
+    return levython::http::HttpMethod::PATCH;
+  if (upper == "DELETE")
+    return levython::http::HttpMethod::DEL;
+  if (upper == "HEAD")
+    return levython::http::HttpMethod::HEAD;
+
+  throw std::runtime_error("Invalid HTTP method: " + method);
+}
+
+Value response_to_value(const levython::http::HttpResponse &resp) {
+  Value response(ObjectType::MAP);
+
+  response.data.map["status"] = Value(static_cast<long>(resp.status));
+  response.data.map["ok"] = Value(resp.ok());
+  response.data.map["url"] = Value(resp.url);
+  response.data.map["elapsed_ms"] = Value(resp.elapsed_ms);
+
+  Value headers_map(ObjectType::MAP);
+  for (const auto &header : resp.headers) {
+    headers_map.data.map[header.first] = Value(header.second);
+  }
+  response.data.map["headers"] = headers_map;
+
+  Value body_list(ObjectType::LIST);
+  body_list.data.list.reserve(resp.body.size());
+  for (uint8_t byte : resp.body) {
+    body_list.data.list.push_back(Value(static_cast<long>(byte)));
+  }
+  response.data.map["body"] = body_list;
+  response.data.map["text"] = Value(resp.text());
+  response.data.map["json_text"] = Value(resp.json_text());
+
+  if (resp.error.has_error()) {
+    Value error_map(ObjectType::MAP);
+    error_map.data.map["type"] =
+        Value(static_cast<long>(static_cast<int>(resp.error.type)));
+    error_map.data.map["message"] = Value(resp.error.message);
+    error_map.data.map["code"] = Value(static_cast<long>(resp.error.code));
+    response.data.map["error"] = error_map;
+  } else {
+    response.data.map["error"] = Value();
+  }
+
+  return response;
+}
+
+Value builtin_http_get(const std::vector<Value> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("http.get() requires at least 1 argument (url)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 1) {
+    headers = value_to_headers(args[1]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().get(url, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_post(const std::vector<Value> &args) {
+  if (args.size() < 2) {
+    throw std::runtime_error("http.post() requires at least 2 arguments (url, body)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  const std::string body = value_to_string(args[1]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 2) {
+    headers = value_to_headers(args[2]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().post(url, body, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_put(const std::vector<Value> &args) {
+  if (args.size() < 2) {
+    throw std::runtime_error("http.put() requires at least 2 arguments (url, body)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  const std::string body = value_to_string(args[1]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 2) {
+    headers = value_to_headers(args[2]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().put(url, body, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_patch(const std::vector<Value> &args) {
+  if (args.size() < 2) {
+    throw std::runtime_error("http.patch() requires at least 2 arguments (url, body)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  const std::string body = value_to_string(args[1]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 2) {
+    headers = value_to_headers(args[2]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().patch(url, body, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_delete(const std::vector<Value> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("http.delete() requires at least 1 argument (url)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 1) {
+    headers = value_to_headers(args[1]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().del(url, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_head(const std::vector<Value> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("http.head() requires at least 1 argument (url)");
+  }
+
+  const std::string url = value_to_string(args[0]);
+  std::map<std::string, std::string> headers;
+  if (args.size() > 1) {
+    headers = value_to_headers(args[1]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().head(url, headers);
+  return response_to_value(resp);
+}
+
+Value builtin_http_request(const std::vector<Value> &args) {
+  if (args.size() < 2) {
+    throw std::runtime_error(
+        "http.request() requires at least 2 arguments (method, url)");
+  }
+
+  levython::http::HttpRequest req;
+  req.method = parse_http_method(value_to_string(args[0]));
+  req.url = value_to_string(args[1]);
+  req.timeout_ms = 0; // use client default timeout unless explicitly provided
+
+  if (args.size() > 2) {
+    req.set_body(value_to_string(args[2]));
+  }
+  if (args.size() > 3) {
+    req.headers = value_to_headers(args[3]);
+  }
+  if (args.size() > 4) {
+    req.timeout_ms = value_to_int(args[4]);
+  }
+  if (args.size() > 5) {
+    req.verify_ssl = value_to_bool(args[5]);
+  }
+
+  auto resp = HttpModuleState::get_instance().client().request(req);
+  return response_to_value(resp);
+}
+
+Value builtin_http_set_timeout(const std::vector<Value> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("http.set_timeout() requires 1 argument (milliseconds)");
+  }
+  HttpModuleState::get_instance().client().set_default_timeout(value_to_int(args[0]));
+  return Value();
+}
+
+Value builtin_http_set_verify_ssl(const std::vector<Value> &args) {
+  if (args.empty()) {
+    throw std::runtime_error("http.set_verify_ssl() requires 1 argument (enabled)");
+  }
+  HttpModuleState::get_instance().client().set_verify_ssl(value_to_bool(args[0]));
+  return Value();
+}
+
+Value create_http_module() {
+  Value http_module(ObjectType::MAP);
+
+  auto add_builtin = [&](const char *name, const char *builtin_name,
+                         std::vector<std::string> params) {
+    Value func(ObjectType::FUNCTION);
+    func.data.function = Value::Data::Function(name, std::move(params));
+    func.data.function.is_builtin = true;
+    func.data.function.builtin_name = builtin_name;
+    http_module.data.map[name] = func;
+  };
+
+  add_builtin("get", "http_get", {"url"});
+  add_builtin("post", "http_post", {"url", "body"});
+  add_builtin("put", "http_put", {"url", "body"});
+  add_builtin("patch", "http_patch", {"url", "body"});
+  add_builtin("delete", "http_delete", {"url"});
+  add_builtin("head", "http_head", {"url"});
+  add_builtin("request", "http_request", {"method", "url"});
+  add_builtin("set_timeout", "http_set_timeout", {"milliseconds"});
+  add_builtin("set_verify_ssl", "http_set_verify_ssl", {"enabled"});
+
+  return http_module;
+}
+
+} // namespace http_bindings
+
+// ============================================================================
+// OS BINDINGS - OS Module Integration
+// ============================================================================
+namespace os_bindings {
+
+namespace {
+std::string value_to_string(const Value &v) {
+  if (v.type == ObjectType::STRING) {
+    return v.data.string;
+  }
+  return v.to_string();
+}
+
+bool value_to_bool(const Value &v) {
+  if (v.type == ObjectType::BOOLEAN) return v.data.boolean;
+  if (v.type == ObjectType::INTEGER) return v.data.integer != 0;
+  if (v.type == ObjectType::FLOAT) return v.data.floating != 0.0;
+  return v.is_truthy();
+}
+
+std::string get_os_name() {
+#ifdef _WIN32
+  return "windows";
+#elif __APPLE__
+  return "macos";
+#elif __linux__
+  return "linux";
+#else
+  return "posix";
+#endif
+}
+} // namespace
+
+Value builtin_os_name(const std::vector<Value> &args) {
+  (void)args;
+  return Value(get_os_name());
+}
+
+Value builtin_os_sep(const std::vector<Value> &args) {
+  (void)args;
+#ifdef _WIN32
+  return Value("\\");
+#else
+  return Value("/");
+#endif
+}
+
+Value builtin_os_cwd(const std::vector<Value> &args) {
+  (void)args;
+  return Value(fs::current_path().string());
+}
+
+Value builtin_os_chdir(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.chdir(path) expects 1 argument.");
+  }
+  fs::current_path(fs::path(value_to_string(args[0])));
+  return Value(true);
+}
+
+Value builtin_os_listdir(const std::vector<Value> &args) {
+  fs::path p = ".";
+  if (!args.empty()) {
+    p = fs::path(value_to_string(args[0]));
+  }
+
+  Value result(ObjectType::LIST);
+  std::vector<std::string> entries;
+  for (const auto &entry : fs::directory_iterator(p)) {
+    entries.push_back(entry.path().filename().string());
+  }
+  std::sort(entries.begin(), entries.end());
+  for (const auto &name : entries) {
+    result.data.list.push_back(Value(name));
+  }
+  return result;
+}
+
+Value builtin_os_exists(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.exists(path) expects 1 argument.");
+  }
+  return Value(fs::exists(fs::path(value_to_string(args[0]))));
+}
+
+Value builtin_os_is_file(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.is_file(path) expects 1 argument.");
+  }
+  return Value(fs::is_regular_file(fs::path(value_to_string(args[0]))));
+}
+
+Value builtin_os_is_dir(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.is_dir(path) expects 1 argument.");
+  }
+  return Value(fs::is_directory(fs::path(value_to_string(args[0]))));
+}
+
+Value builtin_os_mkdir(const std::vector<Value> &args) {
+  if (args.empty() || args.size() > 2) {
+    throw std::runtime_error("os.mkdir(path, recursive=no) expects 1 or 2 arguments.");
+  }
+
+  fs::path p(value_to_string(args[0]));
+  bool recursive = args.size() == 2 ? value_to_bool(args[1]) : false;
+  bool ok = recursive ? fs::create_directories(p) : fs::create_directory(p);
+  return Value(ok || fs::exists(p));
+}
+
+Value builtin_os_remove(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.remove(path) expects 1 argument.");
+  }
+  return Value(fs::remove(fs::path(value_to_string(args[0]))));
+}
+
+Value builtin_os_rmdir(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.rmdir(path) expects 1 argument.");
+  }
+  fs::path p(value_to_string(args[0]));
+  return Value(fs::is_directory(p) && fs::remove(p));
+}
+
+Value builtin_os_rename(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.rename(src, dst) expects 2 arguments.");
+  }
+  fs::rename(fs::path(value_to_string(args[0])), fs::path(value_to_string(args[1])));
+  return Value(true);
+}
+
+Value builtin_os_abspath(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.abspath(path) expects 1 argument.");
+  }
+  return Value(fs::absolute(fs::path(value_to_string(args[0]))).string());
+}
+
+Value builtin_os_getenv(const std::vector<Value> &args) {
+  if (args.empty() || args.size() > 2) {
+    throw std::runtime_error("os.getenv(key, default=\"\") expects 1 or 2 arguments.");
+  }
+  std::string key = value_to_string(args[0]);
+  const char *val = std::getenv(key.c_str());
+  if (val) return Value(std::string(val));
+  if (args.size() == 2) return Value(value_to_string(args[1]));
+  return Value("");
+}
+
+Value builtin_os_setenv(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.setenv(key, value) expects 2 arguments.");
+  }
+  std::string key = value_to_string(args[0]);
+  std::string value = value_to_string(args[1]);
+#ifdef _WIN32
+  int rc = _putenv_s(key.c_str(), value.c_str());
+#else
+  int rc = setenv(key.c_str(), value.c_str(), 1);
+#endif
+  return Value(rc == 0);
+}
+
+Value builtin_os_unsetenv(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.unsetenv(key) expects 1 argument.");
+  }
+  std::string key = value_to_string(args[0]);
+#ifdef _WIN32
+  int rc = _putenv_s(key.c_str(), "");
+#else
+  int rc = unsetenv(key.c_str());
+#endif
+  return Value(rc == 0);
+}
+
+Value create_os_module() {
+  Value os_module(ObjectType::MAP);
+
+  auto add_builtin = [&](const char *name, const char *builtin_name,
+                         std::vector<std::string> params) {
+    Value func(ObjectType::FUNCTION);
+    func.data.function = Value::Data::Function(name, std::move(params));
+    func.data.function.is_builtin = true;
+    func.data.function.builtin_name = builtin_name;
+    os_module.data.map[name] = func;
+  };
+
+  add_builtin("name", "os_name", {});
+  add_builtin("sep", "os_sep", {});
+  add_builtin("cwd", "os_cwd", {});
+  add_builtin("chdir", "os_chdir", {"path"});
+  add_builtin("listdir", "os_listdir", {"path"});
+  add_builtin("exists", "os_exists", {"path"});
+  add_builtin("is_file", "os_is_file", {"path"});
+  add_builtin("is_dir", "os_is_dir", {"path"});
+  add_builtin("mkdir", "os_mkdir", {"path", "recursive"});
+  add_builtin("remove", "os_remove", {"path"});
+  add_builtin("rmdir", "os_rmdir", {"path"});
+  add_builtin("rename", "os_rename", {"src", "dst"});
+  add_builtin("abspath", "os_abspath", {"path"});
+  add_builtin("getenv", "os_getenv", {"key", "default"});
+  add_builtin("setenv", "os_setenv", {"key", "value"});
+  add_builtin("unsetenv", "os_unsetenv", {"key"});
+
+  return os_module;
+}
+
+} // namespace os_bindings
+
+namespace native_module_util {
+inline std::string to_string(const Value& v) {
+    if (v.type == ObjectType::STRING) return v.data.string;
+    return v.to_string();
+}
+inline long to_long(const Value& v) {
+    if (v.type == ObjectType::INTEGER) return v.data.integer;
+    if (v.type == ObjectType::FLOAT) return static_cast<long>(v.data.floating);
+    if (v.type == ObjectType::BOOLEAN) return v.data.boolean ? 1 : 0;
+    return std::stol(v.to_string());
+}
+inline bool to_bool(const Value& v) {
+    if (v.type == ObjectType::BOOLEAN) return v.data.boolean;
+    if (v.type == ObjectType::INTEGER) return v.data.integer != 0;
+    if (v.type == ObjectType::FLOAT) return v.data.floating != 0.0;
+    return v.is_truthy();
+}
+inline Value make_builtin(const char* name, const char* builtin_name, std::vector<std::string> params = {}) {
+    Value func(ObjectType::FUNCTION);
+    func.data.function = Value::Data::Function(name, std::move(params));
+    func.data.function.is_builtin = true;
+    func.data.function.builtin_name = builtin_name;
+    return func;
+}
+} // namespace native_module_util
+
+// ============================================================================
+// FS + PATH BINDINGS
+// ============================================================================
+namespace fs_bindings {
+using namespace native_module_util;
+
+Value builtin_fs_exists(const std::vector<Value>& args) { return Value(fs::exists(fs::path(to_string(args.at(0))))); }
+Value builtin_fs_is_file(const std::vector<Value>& args) { return Value(fs::is_regular_file(fs::path(to_string(args.at(0))))); }
+Value builtin_fs_is_dir(const std::vector<Value>& args) { return Value(fs::is_directory(fs::path(to_string(args.at(0))))); }
+Value builtin_fs_mkdir(const std::vector<Value>& args) {
+    fs::path p(to_string(args.at(0)));
+    bool recursive = args.size() >= 2 ? to_bool(args[1]) : false;
+    bool ok = recursive ? fs::create_directories(p) : fs::create_directory(p);
+    return Value(ok || fs::exists(p));
+}
+Value builtin_fs_remove(const std::vector<Value>& args) { return Value(fs::remove(fs::path(to_string(args.at(0))))); }
+Value builtin_fs_rmdir(const std::vector<Value>& args) {
+    fs::path p(to_string(args.at(0)));
+    return Value(fs::is_directory(p) && fs::remove(p));
+}
+Value builtin_fs_listdir(const std::vector<Value>& args) {
+    fs::path p = args.empty() ? fs::path(".") : fs::path(to_string(args[0]));
+    Value out(ObjectType::LIST);
+    std::vector<std::string> names;
+    for (const auto& e : fs::directory_iterator(p)) names.push_back(e.path().filename().string());
+    std::sort(names.begin(), names.end());
+    for (const auto& n : names) out.data.list.push_back(Value(n));
+    return out;
+}
+Value builtin_fs_read_text(const std::vector<Value>& args) {
+    std::ifstream in(to_string(args.at(0)));
+    if (!in) throw std::runtime_error("fs.read_text() cannot open file");
+    std::string txt((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+    return Value(txt);
+}
+Value builtin_fs_write_text(const std::vector<Value>& args) {
+    std::ofstream out(to_string(args.at(0)), std::ios::trunc);
+    if (!out) throw std::runtime_error("fs.write_text() cannot open file");
+    out << to_string(args.at(1));
+    return Value(true);
+}
+Value builtin_fs_append_text(const std::vector<Value>& args) {
+    std::ofstream out(to_string(args.at(0)), std::ios::app);
+    if (!out) throw std::runtime_error("fs.append_text() cannot open file");
+    out << to_string(args.at(1));
+    return Value(true);
+}
+Value builtin_fs_copy(const std::vector<Value>& args) {
+    bool overwrite = args.size() >= 3 ? to_bool(args[2]) : true;
+    fs::copy_options opt = overwrite ? fs::copy_options::overwrite_existing : fs::copy_options::none;
+    fs::copy_file(to_string(args.at(0)), to_string(args.at(1)), opt);
+    return Value(true);
+}
+Value builtin_fs_move(const std::vector<Value>& args) {
+    fs::rename(to_string(args.at(0)), to_string(args.at(1)));
+    return Value(true);
+}
+Value builtin_fs_abspath(const std::vector<Value>& args) { return Value(fs::absolute(fs::path(to_string(args.at(0)))).string()); }
+
+Value create_fs_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["exists"] = make_builtin("exists", "fs_exists", {"path"});
+    m.data.map["is_file"] = make_builtin("is_file", "fs_is_file", {"path"});
+    m.data.map["is_dir"] = make_builtin("is_dir", "fs_is_dir", {"path"});
+    m.data.map["mkdir"] = make_builtin("mkdir", "fs_mkdir", {"path", "recursive"});
+    m.data.map["remove"] = make_builtin("remove", "fs_remove", {"path"});
+    m.data.map["rmdir"] = make_builtin("rmdir", "fs_rmdir", {"path"});
+    m.data.map["listdir"] = make_builtin("listdir", "fs_listdir", {"path"});
+    m.data.map["read_text"] = make_builtin("read_text", "fs_read_text", {"path"});
+    m.data.map["write_text"] = make_builtin("write_text", "fs_write_text", {"path", "text"});
+    m.data.map["append_text"] = make_builtin("append_text", "fs_append_text", {"path", "text"});
+    m.data.map["copy"] = make_builtin("copy", "fs_copy", {"src", "dst", "overwrite"});
+    m.data.map["move"] = make_builtin("move", "fs_move", {"src", "dst"});
+    m.data.map["abspath"] = make_builtin("abspath", "fs_abspath", {"path"});
+    return m;
+}
+} // namespace fs_bindings
+
+namespace path_bindings {
+using namespace native_module_util;
+
+Value builtin_path_join(const std::vector<Value>& args) {
+    if (args.size() < 2) throw std::runtime_error("path.join() expects >=2 args");
+    fs::path p(to_string(args[0]));
+    for (size_t i = 1; i < args.size(); ++i) p /= to_string(args[i]);
+    return Value(p.string());
+}
+Value builtin_path_basename(const std::vector<Value>& args) { return Value(fs::path(to_string(args.at(0))).filename().string()); }
+Value builtin_path_dirname(const std::vector<Value>& args) { return Value(fs::path(to_string(args.at(0))).parent_path().string()); }
+Value builtin_path_ext(const std::vector<Value>& args) { return Value(fs::path(to_string(args.at(0))).extension().string()); }
+Value builtin_path_stem(const std::vector<Value>& args) { return Value(fs::path(to_string(args.at(0))).stem().string()); }
+Value builtin_path_norm(const std::vector<Value>& args) { return Value(fs::path(to_string(args.at(0))).lexically_normal().string()); }
+Value builtin_path_abspath(const std::vector<Value>& args) { return Value(fs::absolute(fs::path(to_string(args.at(0)))).string()); }
+Value builtin_path_exists(const std::vector<Value>& args) { return Value(fs::exists(fs::path(to_string(args.at(0))))); }
+Value builtin_path_is_file(const std::vector<Value>& args) { return Value(fs::is_regular_file(fs::path(to_string(args.at(0))))); }
+Value builtin_path_is_dir(const std::vector<Value>& args) { return Value(fs::is_directory(fs::path(to_string(args.at(0))))); }
+Value builtin_path_read_text(const std::vector<Value>& args) {
+    std::ifstream in(fs::path(to_string(args.at(0))));
+    if (!in) throw std::runtime_error("path.read_text() cannot open file");
+    std::stringstream buffer;
+    buffer << in.rdbuf();
+    return Value(buffer.str());
+}
+Value builtin_path_write_text(const std::vector<Value>& args) {
+    if (args.size() < 2) throw std::runtime_error("path.write_text() expects 2 args");
+    std::ofstream out(fs::path(to_string(args.at(0))));
+    if (!out) throw std::runtime_error("path.write_text() cannot open file");
+    out << to_string(args.at(1));
+    return Value(true);
+}
+Value builtin_path_listdir(const std::vector<Value>& args) {
+    fs::path p = args.empty() ? fs::path(".") : fs::path(to_string(args.at(0)));
+    Value out(ObjectType::LIST);
+    std::vector<std::string> names;
+    for (const auto& e : fs::directory_iterator(p)) names.push_back(e.path().filename().string());
+    std::sort(names.begin(), names.end());
+    for (const auto& n : names) out.data.list.push_back(Value(n));
+    return out;
+}
+Value builtin_path_mkdir(const std::vector<Value>& args) {
+    if (args.empty()) throw std::runtime_error("path.mkdir() expects 1 or 2 args");
+    bool recursive = args.size() > 1 ? to_bool(args.at(1)) : false;
+    fs::path p(to_string(args.at(0)));
+    bool ok = recursive ? fs::create_directories(p) : fs::create_directory(p);
+    return Value(ok || fs::exists(p));
+}
+Value builtin_path_remove(const std::vector<Value>& args) { return Value(fs::remove(fs::path(to_string(args.at(0))))); }
+Value builtin_path_rmdir(const std::vector<Value>& args) { fs::remove_all(fs::path(to_string(args.at(0)))); return Value(true); }
+
+Value create_path_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["join"] = make_builtin("join", "path_join", {"a", "b"});
+    m.data.map["basename"] = make_builtin("basename", "path_basename", {"path"});
+    m.data.map["dirname"] = make_builtin("dirname", "path_dirname", {"path"});
+    m.data.map["ext"] = make_builtin("ext", "path_ext", {"path"});
+    m.data.map["stem"] = make_builtin("stem", "path_stem", {"path"});
+    m.data.map["norm"] = make_builtin("norm", "path_norm", {"path"});
+    m.data.map["abspath"] = make_builtin("abspath", "path_abspath", {"path"});
+    m.data.map["exists"] = make_builtin("exists", "path_exists", {"path"});
+    m.data.map["is_file"] = make_builtin("is_file", "path_is_file", {"path"});
+    m.data.map["is_dir"] = make_builtin("is_dir", "path_is_dir", {"path"});
+    m.data.map["read_text"] = make_builtin("read_text", "path_read_text", {"path"});
+    m.data.map["write_text"] = make_builtin("write_text", "path_write_text", {"path", "content"});
+    m.data.map["listdir"] = make_builtin("listdir", "path_listdir", {"path"});
+    m.data.map["mkdir"] = make_builtin("mkdir", "path_mkdir", {"path", "recursive"});
+    m.data.map["remove"] = make_builtin("remove", "path_remove", {"path"});
+    m.data.map["rmdir"] = make_builtin("rmdir", "path_rmdir", {"path"});
+    return m;
+}
+} // namespace path_bindings
+
+// ============================================================================
+// PROCESS + URL + JSON BINDINGS
+// ============================================================================
+namespace process_bindings {
+using namespace native_module_util;
+Value builtin_process_getpid(const std::vector<Value>&) {
+#ifdef _WIN32
+    return Value(static_cast<long>(GetCurrentProcessId()));
+#else
+    return Value(static_cast<long>(getpid()));
+#endif
+}
+Value builtin_process_run(const std::vector<Value>& args) {
+    if (args.empty()) throw std::runtime_error("process.run() expects 1 or 2 arguments");
+    std::string cmd;
+    if (args.at(0).type == ObjectType::LIST) {
+        std::ostringstream oss;
+        bool first = true;
+        for (const auto& v : args.at(0).data.list) {
+            if (!first) oss << " ";
+            first = false;
+            std::string part = to_string(v);
+            oss << "\"" << part << "\"";
+        }
+        cmd = oss.str();
+    } else {
+        cmd = to_string(args.at(0));
+    }
+    Value opts;
+    if (args.size() >= 2 && args[1].type == ObjectType::MAP) opts = args[1];
+    std::string cwd;
+    bool redirect_stderr = true;
+    if (opts.type == ObjectType::MAP) {
+        auto it = opts.data.map.find("cwd");
+        if (it != opts.data.map.end() && it->second.type == ObjectType::STRING) cwd = it->second.data.string;
+        auto it2 = opts.data.map.find("redirect_stderr");
+        if (it2 != opts.data.map.end()) redirect_stderr = to_bool(it2->second);
+    }
+
+    std::string env_prefix;
+    if (opts.type == ObjectType::MAP) {
+        auto it = opts.data.map.find("env");
+        if (it != opts.data.map.end() && it->second.type == ObjectType::MAP) {
+            for (const auto& kv : it->second.data.map) {
+#ifdef _WIN32
+                env_prefix += "set " + kv.first + "=" + to_string(kv.second) + " && ";
+#else
+                env_prefix += kv.first + "=\"" + to_string(kv.second) + "\" ";
+#endif
+            }
+        }
+    }
+
+    std::string full_cmd;
+#ifdef _WIN32
+    if (!cwd.empty()) full_cmd += "cd /d \"" + cwd + "\" && ";
+    full_cmd += env_prefix + cmd;
+#else
+    if (!cwd.empty()) full_cmd += "cd \"" + cwd + "\" && ";
+    full_cmd += env_prefix + cmd;
+#endif
+
+    std::string stderr_path;
+    if (redirect_stderr) {
+#ifdef _WIN32
+        char tmp_dir[MAX_PATH] = {0};
+        char tmp_file[MAX_PATH] = {0};
+        GetTempPathA(MAX_PATH, tmp_dir);
+        GetTempFileNameA(tmp_dir, "levy", 0, tmp_file);
+        stderr_path = tmp_file;
+#else
+        char tmpl[] = "/tmp/levyprocXXXXXX";
+        int fd = mkstemp(tmpl);
+        if (fd >= 0) close(fd);
+        stderr_path = tmpl;
+#endif
+        full_cmd += " 2> \"" + stderr_path + "\"";
+    }
+
+#ifdef _WIN32
+    FILE* pipe = _popen(full_cmd.c_str(), "r");
+#else
+    FILE* pipe = popen(full_cmd.c_str(), "r");
+#endif
+    if (!pipe) throw std::runtime_error("process.run() failed to start command");
+    std::string out;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), pipe)) out += buf;
+#ifdef _WIN32
+    int rc = _pclose(pipe);
+#else
+    int rc = pclose(pipe);
+    if (WIFEXITED(rc)) rc = WEXITSTATUS(rc);
+#endif
+    std::string err;
+    if (redirect_stderr && !stderr_path.empty()) {
+        std::ifstream ein(stderr_path);
+        if (ein) {
+            std::stringstream buffer;
+            buffer << ein.rdbuf();
+            err = buffer.str();
+        }
+        std::remove(stderr_path.c_str());
+    }
+    Value result(ObjectType::MAP);
+    result.data.map["exit_code"] = Value(static_cast<long>(rc));
+    result.data.map["stdout"] = Value(out);
+    result.data.map["stderr"] = Value(err);
+    return result;
+}
+Value builtin_process_cwd(const std::vector<Value>&) { return Value(fs::current_path().string()); }
+Value builtin_process_chdir(const std::vector<Value>& args) { fs::current_path(fs::path(to_string(args.at(0)))); return Value(true); }
+Value builtin_process_getenv(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0));
+    const char* v = std::getenv(key.c_str());
+    if (v) return Value(std::string(v));
+    if (args.size() >= 2) return Value(to_string(args[1]));
+    return Value("");
+}
+Value builtin_process_setenv(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0)), val = to_string(args.at(1));
+#ifdef _WIN32
+    return Value(_putenv_s(key.c_str(), val.c_str()) == 0);
+#else
+    return Value(setenv(key.c_str(), val.c_str(), 1) == 0);
+#endif
+}
+Value builtin_process_unsetenv(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0));
+#ifdef _WIN32
+    return Value(_putenv_s(key.c_str(), "") == 0);
+#else
+    return Value(unsetenv(key.c_str()) == 0);
+#endif
+}
+Value create_process_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["getpid"] = make_builtin("getpid", "process_getpid", {});
+    m.data.map["run"] = make_builtin("run", "process_run", {"cmd"});
+    m.data.map["cwd"] = make_builtin("cwd", "process_cwd", {});
+    m.data.map["chdir"] = make_builtin("chdir", "process_chdir", {"path"});
+    m.data.map["getenv"] = make_builtin("getenv", "process_getenv", {"key", "default"});
+    m.data.map["setenv"] = make_builtin("setenv", "process_setenv", {"key", "value"});
+    m.data.map["unsetenv"] = make_builtin("unsetenv", "process_unsetenv", {"key"});
+    return m;
+}
+} // namespace process_bindings
+
+// ============================================================================
+// CRYPTO + TIME + LOG + CONFIG BINDINGS
+// ============================================================================
+namespace crypto_bindings {
+using namespace native_module_util;
+
+static std::vector<uint8_t> value_to_bytes(const Value& v) {
+    if (v.type == ObjectType::STRING) {
+        return std::vector<uint8_t>(v.data.string.begin(), v.data.string.end());
+    }
+    if (v.type == ObjectType::LIST) {
+        std::vector<uint8_t> out;
+        out.reserve(v.data.list.size());
+        for (const auto& item : v.data.list) {
+            if (item.type != ObjectType::INTEGER) throw std::runtime_error("Byte list must contain integers");
+            long n = item.data.integer;
+            if (n < 0 || n > 255) throw std::runtime_error("Byte out of range");
+            out.push_back(static_cast<uint8_t>(n));
+        }
+        return out;
+    }
+    throw std::runtime_error("Expected string or byte list");
+}
+
+static Value bytes_to_list(const std::vector<uint8_t>& bytes) {
+    Value out(ObjectType::LIST);
+    out.data.list.reserve(bytes.size());
+    for (uint8_t b : bytes) out.data.list.emplace_back(static_cast<long>(b));
+    return out;
+}
+
+static std::string hex_encode_bytes(const std::vector<uint8_t>& bytes) {
+    static const char* hex = "0123456789abcdef";
+    std::string out;
+    out.reserve(bytes.size() * 2);
+    for (uint8_t b : bytes) {
+        out.push_back(hex[(b >> 4) & 0xF]);
+        out.push_back(hex[b & 0xF]);
+    }
+    return out;
+}
+
+static std::vector<uint8_t> hex_decode_bytes(const std::string& hex) {
+    if (hex.size() % 2 != 0) throw std::runtime_error("Invalid hex length");
+    std::vector<uint8_t> out;
+    out.reserve(hex.size() / 2);
+    auto hex_val = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
+        if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
+        return -1;
+    };
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        int hi = hex_val(hex[i]);
+        int lo = hex_val(hex[i + 1]);
+        if (hi < 0 || lo < 0) throw std::runtime_error("Invalid hex character");
+        out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return out;
+}
+
+Value builtin_crypto_sha256(const std::vector<Value>& args) {
+    auto bytes = value_to_bytes(args.at(0));
+    unsigned int out_len = 0;
+    unsigned char out[EVP_MAX_MD_SIZE];
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha256(), nullptr);
+    EVP_DigestUpdate(ctx, bytes.data(), bytes.size());
+    EVP_DigestFinal_ex(ctx, out, &out_len);
+    EVP_MD_CTX_free(ctx);
+    return Value(hex_encode_bytes(std::vector<uint8_t>(out, out + out_len)));
+}
+
+Value builtin_crypto_sha512(const std::vector<Value>& args) {
+    auto bytes = value_to_bytes(args.at(0));
+    unsigned int out_len = 0;
+    unsigned char out[EVP_MAX_MD_SIZE];
+    EVP_MD_CTX* ctx = EVP_MD_CTX_new();
+    EVP_DigestInit_ex(ctx, EVP_sha512(), nullptr);
+    EVP_DigestUpdate(ctx, bytes.data(), bytes.size());
+    EVP_DigestFinal_ex(ctx, out, &out_len);
+    EVP_MD_CTX_free(ctx);
+    return Value(hex_encode_bytes(std::vector<uint8_t>(out, out + out_len)));
+}
+
+Value builtin_crypto_hmac_sha256(const std::vector<Value>& args) {
+    auto key = value_to_bytes(args.at(0));
+    auto msg = value_to_bytes(args.at(1));
+    unsigned int out_len = 0;
+    unsigned char out[EVP_MAX_MD_SIZE];
+    HMAC(EVP_sha256(), key.data(), (int)key.size(), msg.data(), msg.size(), out, &out_len);
+    return Value(hex_encode_bytes(std::vector<uint8_t>(out, out + out_len)));
+}
+
+Value builtin_crypto_random_bytes(const std::vector<Value>& args) {
+    long n = to_long(args.at(0));
+    if (n < 0) throw std::runtime_error("random_bytes size must be >= 0");
+    std::vector<uint8_t> out(static_cast<size_t>(n));
+    if (n > 0 && RAND_bytes(out.data(), (int)n) != 1) {
+        throw std::runtime_error("random_bytes failed");
+    }
+    return bytes_to_list(out);
+}
+
+Value builtin_crypto_hex_encode(const std::vector<Value>& args) {
+    auto bytes = value_to_bytes(args.at(0));
+    return Value(hex_encode_bytes(bytes));
+}
+
+Value builtin_crypto_hex_decode(const std::vector<Value>& args) {
+    auto bytes = hex_decode_bytes(to_string(args.at(0)));
+    return bytes_to_list(bytes);
+}
+
+Value builtin_crypto_base64_encode(const std::vector<Value>& args) {
+    auto bytes = value_to_bytes(args.at(0));
+    std::string out;
+    out.resize(4 * ((bytes.size() + 2) / 3));
+    int len = EVP_EncodeBlock(reinterpret_cast<unsigned char*>(&out[0]),
+                              bytes.data(), (int)bytes.size());
+    out.resize(static_cast<size_t>(len));
+    return Value(out);
+}
+
+Value builtin_crypto_base64_decode(const std::vector<Value>& args) {
+    std::string in = to_string(args.at(0));
+    std::vector<uint8_t> out((in.size() * 3) / 4 + 1);
+    int len = EVP_DecodeBlock(out.data(),
+                              reinterpret_cast<const unsigned char*>(in.data()),
+                              (int)in.size());
+    if (len < 0) throw std::runtime_error("Invalid base64");
+    out.resize(static_cast<size_t>(len));
+    return bytes_to_list(out);
+}
+
+Value create_crypto_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["sha256"] = make_builtin("sha256", "crypto_sha256", {"data"});
+    m.data.map["sha512"] = make_builtin("sha512", "crypto_sha512", {"data"});
+    m.data.map["hmac_sha256"] = make_builtin("hmac_sha256", "crypto_hmac_sha256", {"key", "data"});
+    m.data.map["random_bytes"] = make_builtin("random_bytes", "crypto_random_bytes", {"n"});
+    m.data.map["hex_encode"] = make_builtin("hex_encode", "crypto_hex_encode", {"data"});
+    m.data.map["hex_decode"] = make_builtin("hex_decode", "crypto_hex_decode", {"hex"});
+    m.data.map["base64_encode"] = make_builtin("base64_encode", "crypto_base64_encode", {"data"});
+    m.data.map["base64_decode"] = make_builtin("base64_decode", "crypto_base64_decode", {"b64"});
+    return m;
+}
+} // namespace crypto_bindings
+
+namespace time_bindings {
+using namespace native_module_util;
+
+static int64_t epoch_ms_now() {
+    auto now = std::chrono::system_clock::now();
+    auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+    return static_cast<int64_t>(ms);
+}
+
+static std::string format_time(std::time_t t, const std::string& fmt, bool utc) {
+    std::tm tm_val;
+#ifdef _WIN32
+    if (utc) gmtime_s(&tm_val, &t);
+    else localtime_s(&tm_val, &t);
+#else
+    if (utc) gmtime_r(&t, &tm_val);
+    else localtime_r(&t, &tm_val);
+#endif
+    char buf[128];
+    if (std::strftime(buf, sizeof(buf), fmt.c_str(), &tm_val) == 0) return "";
+    return std::string(buf);
+}
+
+static int64_t tz_offset_minutes() {
+    std::time_t now = std::time(nullptr);
+    std::tm local_tm;
+    std::tm utc_tm;
+#ifdef _WIN32
+    localtime_s(&local_tm, &now);
+    gmtime_s(&utc_tm, &now);
+#else
+    localtime_r(&now, &local_tm);
+    gmtime_r(&now, &utc_tm);
+#endif
+    std::time_t local = std::mktime(&local_tm);
+    std::time_t utc = std::mktime(&utc_tm);
+    return static_cast<int64_t>(std::difftime(local, utc) / 60);
+}
+
+Value builtin_time_now_utc(const std::vector<Value>&) {
+    int64_t ms = epoch_ms_now();
+    std::time_t t = static_cast<std::time_t>(ms / 1000);
+    Value out(ObjectType::MAP);
+    out.data.map["epoch_ms"] = Value(static_cast<long>(ms));
+    out.data.map["iso"] = Value(format_time(t, "%Y-%m-%dT%H:%M:%SZ", true));
+    return out;
+}
+
+Value builtin_time_now_local(const std::vector<Value>&) {
+    int64_t ms = epoch_ms_now();
+    std::time_t t = static_cast<std::time_t>(ms / 1000);
+    Value out(ObjectType::MAP);
+    out.data.map["epoch_ms"] = Value(static_cast<long>(ms));
+    out.data.map["iso"] = Value(format_time(t, "%Y-%m-%dT%H:%M:%S", false));
+    out.data.map["tz_offset_min"] = Value(static_cast<long>(tz_offset_minutes()));
+    return out;
+}
+
+Value builtin_time_format(const std::vector<Value>& args) {
+    if (args.size() < 2) throw std::runtime_error("time.format() expects (epoch_ms, fmt, utc?)");
+    int64_t ms = static_cast<int64_t>(to_long(args.at(0)));
+    std::string fmt = to_string(args.at(1));
+    bool utc = args.size() >= 3 ? to_bool(args.at(2)) : true;
+    std::time_t t = static_cast<std::time_t>(ms / 1000);
+    return Value(format_time(t, fmt, utc));
+}
+
+Value builtin_time_parse(const std::vector<Value>& args) {
+    if (args.size() < 2) throw std::runtime_error("time.parse() expects (text, fmt, utc?)");
+    std::string text = to_string(args.at(0));
+    std::string fmt = to_string(args.at(1));
+    bool utc = args.size() >= 3 ? to_bool(args.at(2)) : true;
+    std::tm tm_val{};
+    std::istringstream iss(text);
+    iss >> std::get_time(&tm_val, fmt.c_str());
+    if (iss.fail()) throw std::runtime_error("time.parse() failed");
+#ifdef _WIN32
+    std::time_t t = utc ? _mkgmtime(&tm_val) : std::mktime(&tm_val);
+#else
+    std::time_t t = utc ? timegm(&tm_val) : std::mktime(&tm_val);
+#endif
+    if (t == (std::time_t)-1) throw std::runtime_error("time.parse() invalid time");
+    return Value(static_cast<long>(static_cast<int64_t>(t) * 1000));
+}
+
+Value builtin_time_sleep_ms(const std::vector<Value>& args) {
+    long ms = to_long(args.at(0));
+    if (ms < 0) ms = 0;
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return Value();
+}
+
+Value builtin_time_epoch_ms(const std::vector<Value>&) {
+    return Value(static_cast<long>(epoch_ms_now()));
+}
+
+Value create_time_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["now_utc"] = make_builtin("now_utc", "time_now_utc", {});
+    m.data.map["now_local"] = make_builtin("now_local", "time_now_local", {});
+    m.data.map["format"] = make_builtin("format", "time_format", {"epoch_ms", "fmt", "utc"});
+    m.data.map["parse"] = make_builtin("parse", "time_parse", {"text", "fmt", "utc"});
+    m.data.map["sleep_ms"] = make_builtin("sleep_ms", "time_sleep_ms", {"ms"});
+    m.data.map["epoch_ms"] = make_builtin("epoch_ms", "time_epoch_ms", {});
+    return m;
+}
+} // namespace time_bindings
+
+namespace log_bindings {
+using namespace native_module_util;
+
+enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERR = 3 };
+static LogLevel g_level = LogLevel::INFO;
+static bool g_json = true;
+static std::unique_ptr<std::ofstream> g_log_file;
+
+static LogLevel parse_level(const std::string& s) {
+    std::string l = s;
+    std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+    if (l == "debug") return LogLevel::DEBUG;
+    if (l == "info") return LogLevel::INFO;
+    if (l == "warn" || l == "warning") return LogLevel::WARN;
+    if (l == "error") return LogLevel::ERR;
+    return LogLevel::INFO;
+}
+
+static std::string json_escape(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() + 8);
+    for (char c : s) {
+        switch (c) {
+            case '\\': out += "\\\\"; break;
+            case '"': out += "\\\""; break;
+            case '\n': out += "\\n"; break;
+            case '\r': out += "\\r"; break;
+            case '\t': out += "\\t"; break;
+            default: out.push_back(c); break;
+        }
+    }
+    return out;
+}
+
+static std::string value_json(const Value& v) {
+    if (v.type == ObjectType::STRING) return "\"" + json_escape(v.data.string) + "\"";
+    if (v.type == ObjectType::INTEGER) return std::to_string(v.data.integer);
+    if (v.type == ObjectType::FLOAT) return std::to_string(v.data.floating);
+    if (v.type == ObjectType::BOOLEAN) return v.data.boolean ? "true" : "false";
+    if (v.type == ObjectType::NONE) return "null";
+    return "\"" + json_escape(v.to_string()) + "\"";
+}
+
+static void emit_log(LogLevel level, const std::string& message, const Value* fields) {
+    if (static_cast<int>(level) < static_cast<int>(g_level)) return;
+    int64_t ms = time_bindings::epoch_ms_now();
+    std::string ts = time_bindings::format_time(static_cast<std::time_t>(ms / 1000), "%Y-%m-%dT%H:%M:%S", false);
+    std::ostringstream oss;
+    if (g_json) {
+        oss << "{\"ts\":\"" << json_escape(ts) << "\",\"level\":\"";
+        switch (level) {
+            case LogLevel::DEBUG: oss << "debug"; break;
+            case LogLevel::INFO: oss << "info"; break;
+            case LogLevel::WARN: oss << "warn"; break;
+            case LogLevel::ERR: oss << "error"; break;
+        }
+        oss << "\",\"msg\":\"" << json_escape(message) << "\"";
+        if (fields && fields->type == ObjectType::MAP) {
+            oss << ",\"fields\":{";
+            bool first = true;
+            for (const auto& kv : fields->data.map) {
+                if (!first) oss << ",";
+                first = false;
+                oss << "\"" << json_escape(kv.first) << "\":" << value_json(kv.second);
+            }
+            oss << "}";
+        }
+        oss << "}\n";
+    } else {
+        oss << "[" << ts << "] ";
+        switch (level) {
+            case LogLevel::DEBUG: oss << "DEBUG"; break;
+            case LogLevel::INFO: oss << "INFO"; break;
+            case LogLevel::WARN: oss << "WARN"; break;
+            case LogLevel::ERR: oss << "ERROR"; break;
+        }
+        oss << ": " << message;
+        if (fields && fields->type == ObjectType::MAP && !fields->data.map.empty()) {
+            oss << " {";
+            bool first = true;
+            for (const auto& kv : fields->data.map) {
+                if (!first) oss << ", ";
+                first = false;
+                oss << kv.first << "=" << kv.second.to_string();
+            }
+            oss << "}";
+        }
+        oss << "\n";
+    }
+    if (g_log_file && g_log_file->is_open()) {
+        (*g_log_file) << oss.str();
+        g_log_file->flush();
+    } else {
+        std::cout << oss.str();
+    }
+}
+
+Value builtin_log_set_level(const std::vector<Value>& args) {
+    g_level = parse_level(to_string(args.at(0)));
+    return Value(true);
+}
+Value builtin_log_set_output(const std::vector<Value>& args) {
+    std::string path = to_string(args.at(0));
+    if (path == "stdout") {
+        g_log_file.reset();
+        return Value(true);
+    }
+    g_log_file = std::make_unique<std::ofstream>(path, std::ios::app);
+    if (!g_log_file->is_open()) throw std::runtime_error("log.set_output() cannot open file");
+    return Value(true);
+}
+Value builtin_log_set_json(const std::vector<Value>& args) {
+    g_json = to_bool(args.at(0));
+    return Value(true);
+}
+Value builtin_log_log(const std::vector<Value>& args) {
+    if (args.size() < 2) throw std::runtime_error("log.log() expects (level, message, fields?)");
+    LogLevel lvl = parse_level(to_string(args.at(0)));
+    std::string msg = to_string(args.at(1));
+    const Value* fields = args.size() >= 3 ? &args.at(2) : nullptr;
+    emit_log(lvl, msg, fields);
+    return Value();
+}
+Value builtin_log_debug(const std::vector<Value>& args) { emit_log(LogLevel::DEBUG, to_string(args.at(0)), args.size() >= 2 ? &args.at(1) : nullptr); return Value(); }
+Value builtin_log_info(const std::vector<Value>& args) { emit_log(LogLevel::INFO, to_string(args.at(0)), args.size() >= 2 ? &args.at(1) : nullptr); return Value(); }
+Value builtin_log_warn(const std::vector<Value>& args) { emit_log(LogLevel::WARN, to_string(args.at(0)), args.size() >= 2 ? &args.at(1) : nullptr); return Value(); }
+Value builtin_log_error(const std::vector<Value>& args) { emit_log(LogLevel::ERR, to_string(args.at(0)), args.size() >= 2 ? &args.at(1) : nullptr); return Value(); }
+Value builtin_log_flush(const std::vector<Value>&) { if (g_log_file) g_log_file->flush(); return Value(true); }
+
+Value create_log_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["set_level"] = make_builtin("set_level", "log_set_level", {"level"});
+    m.data.map["set_output"] = make_builtin("set_output", "log_set_output", {"path"});
+    m.data.map["set_json"] = make_builtin("set_json", "log_set_json", {"enabled"});
+    m.data.map["log"] = make_builtin("log", "log_log", {"level", "message", "fields"});
+    m.data.map["debug"] = make_builtin("debug", "log_debug", {"message", "fields"});
+    m.data.map["info"] = make_builtin("info", "log_info", {"message", "fields"});
+    m.data.map["warn"] = make_builtin("warn", "log_warn", {"message", "fields"});
+    m.data.map["error"] = make_builtin("error", "log_error", {"message", "fields"});
+    m.data.map["flush"] = make_builtin("flush", "log_flush", {});
+    return m;
+}
+} // namespace log_bindings
+
+namespace config_bindings {
+using namespace native_module_util;
+
+static std::unordered_map<std::string, std::string> g_config;
+
+static std::string trim_env(const std::string& s) {
+    size_t start = 0, end = s.size();
+    while (start < end && std::isspace(static_cast<unsigned char>(s[start]))) ++start;
+    while (end > start && std::isspace(static_cast<unsigned char>(s[end - 1]))) --end;
+    return s.substr(start, end - start);
+}
+
+Value builtin_config_load_env(const std::vector<Value>& args) {
+    std::string path = args.empty() ? ".env" : to_string(args.at(0));
+    std::ifstream in(path);
+    if (!in) throw std::runtime_error("config.load_env() cannot open file");
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trim_env(line);
+        if (line.empty() || line[0] == '#') continue;
+        auto pos = line.find('=');
+        if (pos == std::string::npos) continue;
+        std::string key = trim_env(line.substr(0, pos));
+        std::string val = trim_env(line.substr(pos + 1));
+        if (!val.empty() && val.front() == '"' && val.back() == '"') {
+            val = val.substr(1, val.size() - 2);
+        }
+        g_config[key] = val;
+    }
+    return Value(true);
+}
+
+Value builtin_config_get(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0));
+    const char* env = std::getenv(key.c_str());
+    if (env) return Value(std::string(env));
+    auto it = g_config.find(key);
+    if (it != g_config.end()) return Value(it->second);
+    if (args.size() >= 2) return Value(to_string(args.at(1)));
+    return Value("");
+}
+
+Value builtin_config_set(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0));
+    std::string val = to_string(args.at(1));
+    g_config[key] = val;
+    return Value(true);
+}
+
+Value builtin_config_get_int(const std::vector<Value>& args) {
+    std::string v = builtin_config_get(args).data.string;
+    int64_t out = 0;
+    if (!parse_int64_strict(v, out)) {
+        if (args.size() >= 2) return Value(static_cast<long>(to_long(args.at(1))));
+        throw std::runtime_error("config.get_int() invalid integer");
+    }
+    return Value(static_cast<long>(out));
+}
+
+Value builtin_config_get_float(const std::vector<Value>& args) {
+    std::string v = builtin_config_get(args).data.string;
+    double out = 0.0;
+    if (!parse_double_strict(v, out)) {
+        if (args.size() >= 2) {
+            if (args.at(1).type == ObjectType::FLOAT) return args.at(1);
+            if (args.at(1).type == ObjectType::INTEGER) return Value(static_cast<double>(args.at(1).data.integer));
+            double def = 0.0;
+            if (parse_double_strict(to_string(args.at(1)), def)) return Value(def);
+        }
+        throw std::runtime_error("config.get_float() invalid float");
+    }
+    return Value(out);
+}
+
+Value builtin_config_get_bool(const std::vector<Value>& args) {
+    std::string v = builtin_config_get(args).data.string;
+    std::string l = v;
+    std::transform(l.begin(), l.end(), l.begin(), ::tolower);
+    if (l == "1" || l == "true" || l == "yes" || l == "on") return Value(true);
+    if (l == "0" || l == "false" || l == "no" || l == "off") return Value(false);
+    if (args.size() >= 2) return Value(to_bool(args.at(1)));
+    throw std::runtime_error("config.get_bool() invalid boolean");
+}
+
+Value builtin_config_has(const std::vector<Value>& args) {
+    std::string key = to_string(args.at(0));
+    if (std::getenv(key.c_str())) return Value(true);
+    return Value(g_config.find(key) != g_config.end());
+}
+
+Value create_config_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["load_env"] = make_builtin("load_env", "config_load_env", {"path"});
+    m.data.map["get"] = make_builtin("get", "config_get", {"key", "default"});
+    m.data.map["set"] = make_builtin("set", "config_set", {"key", "value"});
+    m.data.map["get_int"] = make_builtin("get_int", "config_get_int", {"key", "default"});
+    m.data.map["get_float"] = make_builtin("get_float", "config_get_float", {"key", "default"});
+    m.data.map["get_bool"] = make_builtin("get_bool", "config_get_bool", {"key", "default"});
+    m.data.map["has"] = make_builtin("has", "config_has", {"key"});
+    return m;
+}
+} // namespace config_bindings
+
+namespace input_bindings {
+using namespace native_module_util;
+
+#ifndef _WIN32
+static bool g_input_raw_enabled = false;
+static bool g_input_has_termios = false;
+static termios g_input_orig{};
+
+static void restore_terminal() {
+    if (g_input_raw_enabled && g_input_has_termios) {
+        tcsetattr(STDIN_FILENO, TCSANOW, &g_input_orig);
+        g_input_raw_enabled = false;
+    }
+}
+
+static bool enable_raw_mode() {
+    if (g_input_raw_enabled) return true;
+    if (!isatty(STDIN_FILENO)) return false;
+    termios raw{};
+    if (tcgetattr(STDIN_FILENO, &g_input_orig) != 0) return false;
+    g_input_has_termios = true;
+    raw = g_input_orig;
+    raw.c_lflag &= ~(ICANON | ECHO);
+    raw.c_cc[VMIN] = 0;
+    raw.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &raw) != 0) return false;
+    g_input_raw_enabled = true;
+    static bool registered = false;
+    if (!registered) {
+        std::atexit(restore_terminal);
+        registered = true;
+    }
+    return true;
+}
+
+static bool disable_raw_mode() {
+    if (!g_input_raw_enabled) return true;
+    restore_terminal();
+    return true;
+}
+
+static bool stdin_available() {
+    fd_set rfds;
+    FD_ZERO(&rfds);
+    FD_SET(STDIN_FILENO, &rfds);
+    timeval tv{};
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    int rc = select(STDIN_FILENO + 1, &rfds, nullptr, nullptr, &tv);
+    return rc > 0 && FD_ISSET(STDIN_FILENO, &rfds);
+}
+#else
+static bool enable_raw_mode() { return true; }
+static bool disable_raw_mode() { return true; }
+static bool stdin_available() { return _kbhit() != 0; }
+#endif
+
+static Value make_poll_result(bool ok, int code, bool special, const std::string& key) {
+    Value out(ObjectType::MAP);
+    out.data.map["ok"] = Value(ok);
+    out.data.map["code"] = Value(static_cast<long>(code));
+    out.data.map["special"] = Value(special);
+    out.data.map["key"] = Value(key);
+    return out;
+}
+
+Value builtin_input_enable_raw(const std::vector<Value>&) {
+    return Value(enable_raw_mode());
+}
+
+Value builtin_input_disable_raw(const std::vector<Value>&) {
+    return Value(disable_raw_mode());
+}
+
+Value builtin_input_key_available(const std::vector<Value>&) {
+    return Value(stdin_available());
+}
+
+Value builtin_input_poll(const std::vector<Value>&) {
+    if (!stdin_available()) return make_poll_result(false, 0, false, "");
+#ifdef _WIN32
+    int c = _getch();
+    if (c == 0 || c == 224) {
+        int c2 = _getch();
+        return make_poll_result(true, c2, true, "");
+    }
+    return make_poll_result(true, c, false, std::string(1, static_cast<char>(c)));
+#else
+    unsigned char ch = 0;
+    int n = static_cast<int>(read(STDIN_FILENO, &ch, 1));
+    if (n <= 0) return make_poll_result(false, 0, false, "");
+    return make_poll_result(true, static_cast<int>(ch), false, std::string(1, static_cast<char>(ch)));
+#endif
+}
+
+Value builtin_input_read_key(const std::vector<Value>&) {
+    Value r = builtin_input_poll({});
+    if (r.type != ObjectType::MAP) return Value("");
+    auto it = r.data.map.find("key");
+    if (it == r.data.map.end()) return Value("");
+    return it->second;
+}
+
+Value create_input_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["enable_raw"] = make_builtin("enable_raw", "input_enable_raw", {});
+    m.data.map["disable_raw"] = make_builtin("disable_raw", "input_disable_raw", {});
+    m.data.map["key_available"] = make_builtin("key_available", "input_key_available", {});
+    m.data.map["poll"] = make_builtin("poll", "input_poll", {});
+    m.data.map["read_key"] = make_builtin("read_key", "input_read_key", {});
+    return m;
+}
+} // namespace input_bindings
+
+namespace url_bindings {
+using namespace native_module_util;
+
+static std::string pct_encode(const std::string& s) {
+    static const char* hex = "0123456789ABCDEF";
+    std::string out;
+    for (unsigned char c : s) {
+        if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~') out.push_back(static_cast<char>(c));
+        else {
+            out.push_back('%');
+            out.push_back(hex[(c >> 4) & 0xF]);
+            out.push_back(hex[c & 0xF]);
+        }
+    }
+    return out;
+}
+static std::string pct_decode(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] == '%' && i + 2 < s.size()) {
+            int v = std::stoi(s.substr(i + 1, 2), nullptr, 16);
+            out.push_back(static_cast<char>(v));
+            i += 2;
+        } else if (s[i] == '+') out.push_back(' ');
+        else out.push_back(s[i]);
+    }
+    return out;
+}
+
+Value builtin_url_encode(const std::vector<Value>& args) { return Value(pct_encode(to_string(args.at(0)))); }
+Value builtin_url_decode(const std::vector<Value>& args) { return Value(pct_decode(to_string(args.at(0)))); }
+Value builtin_url_parse(const std::vector<Value>& args) {
+    std::string u = to_string(args.at(0));
+    Value m(ObjectType::MAP);
+    m.data.map["scheme"] = Value("");
+    m.data.map["host"] = Value("");
+    m.data.map["port"] = Value(static_cast<long>(0));
+    m.data.map["path"] = Value("");
+    m.data.map["query"] = Value("");
+    m.data.map["fragment"] = Value("");
+    size_t p = u.find("://");
+    size_t i = 0;
+    if (p != std::string::npos) {
+        m.data.map["scheme"] = Value(u.substr(0, p));
+        i = p + 3;
+    }
+    size_t host_end = u.find_first_of("/?#", i);
+    std::string host_port = u.substr(i, host_end == std::string::npos ? u.size() - i : host_end - i);
+    size_t colon = host_port.rfind(':');
+    if (colon != std::string::npos && colon + 1 < host_port.size()) {
+        m.data.map["host"] = Value(host_port.substr(0, colon));
+        m.data.map["port"] = Value(static_cast<long>(std::strtol(host_port.substr(colon + 1).c_str(), nullptr, 10)));
+    } else {
+        m.data.map["host"] = Value(host_port);
+    }
+    if (host_end != std::string::npos) {
+        size_t q = u.find('?', host_end);
+        size_t h = u.find('#', host_end);
+        size_t path_end = std::min(q == std::string::npos ? u.size() : q, h == std::string::npos ? u.size() : h);
+        m.data.map["path"] = Value(u.substr(host_end, path_end - host_end));
+        if (q != std::string::npos) {
+            size_t q_end = h == std::string::npos ? u.size() : h;
+            m.data.map["query"] = Value(u.substr(q + 1, q_end - q - 1));
+        }
+        if (h != std::string::npos) m.data.map["fragment"] = Value(u.substr(h + 1));
+    }
+    return m;
+}
+Value create_url_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["parse"] = make_builtin("parse", "url_parse", {"url"});
+    m.data.map["encode"] = make_builtin("encode", "url_encode", {"text"});
+    m.data.map["decode"] = make_builtin("decode", "url_decode", {"text"});
+    return m;
+}
+} // namespace url_bindings
+
+namespace json_bindings {
+using namespace native_module_util;
+
+class JsonParser {
+    const std::string& s; size_t i = 0;
+    void ws() { while (i < s.size() && std::isspace(static_cast<unsigned char>(s[i]))) i++; }
+    char peek() const { return i < s.size() ? s[i] : '\0'; }
+    bool eat(char c) { ws(); if (peek() == c) { i++; return true; } return false; }
+    [[noreturn]] void err(const std::string& m) const {
+        throw std::runtime_error("json.parse: " + m + " at index " + std::to_string(i));
+    }
+    static void append_utf8(std::string& out, unsigned cp) {
+        if (cp <= 0x7F) {
+            out.push_back(static_cast<char>(cp));
+            return;
+        }
+        if (cp <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | ((cp >> 6) & 0x1F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            return;
+        }
+        if (cp <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | ((cp >> 12) & 0x0F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+            return;
+        }
+        out.push_back(static_cast<char>(0xF0 | ((cp >> 18) & 0x07)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+        out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+    }
+    unsigned parse_hex4() {
+        if (i + 4 > s.size()) err("incomplete unicode escape");
+        unsigned value = 0;
+        for (int n = 0; n < 4; ++n) {
+            char c = s[i++];
+            value <<= 4;
+            if (c >= '0' && c <= '9') value |= static_cast<unsigned>(c - '0');
+            else if (c >= 'a' && c <= 'f') value |= static_cast<unsigned>(10 + (c - 'a'));
+            else if (c >= 'A' && c <= 'F') value |= static_cast<unsigned>(10 + (c - 'A'));
+            else err("invalid hex in unicode escape");
+        }
+        return value;
+    }
+    std::string parse_string() {
+        if (!eat('"')) err("expected string");
+        std::string out;
+        while (i < s.size()) {
+            char c = s[i++];
+            if (c == '"') return out;
+            if (c == '\\' && i < s.size()) {
+                char e = s[i++];
+                switch (e) {
+                    case '"': out.push_back('"'); break;
+                    case '\\': out.push_back('\\'); break;
+                    case '/': out.push_back('/'); break;
+                    case 'b': out.push_back('\b'); break;
+                    case 'f': out.push_back('\f'); break;
+                    case 'n': out.push_back('\n'); break;
+                    case 'r': out.push_back('\r'); break;
+                    case 't': out.push_back('\t'); break;
+                    case 'u': {
+                        unsigned cp = parse_hex4();
+                        if (cp >= 0xD800 && cp <= 0xDBFF) {
+                            if (i + 2 > s.size() || s[i] != '\\' || s[i + 1] != 'u') {
+                                err("missing low surrogate");
+                            }
+                            i += 2;
+                            unsigned low = parse_hex4();
+                            if (low < 0xDC00 || low > 0xDFFF) err("invalid low surrogate");
+                            cp = 0x10000u + (((cp - 0xD800u) << 10) | (low - 0xDC00u));
+                        } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+                            err("unexpected low surrogate");
+                        }
+                        append_utf8(out, cp);
+                        break;
+                    }
+                    default: err("invalid escape");
+                }
+            } else {
+                if (static_cast<unsigned char>(c) < 0x20) err("control character in string");
+                out.push_back(c);
+            }
+        }
+        err("unterminated string");
+    }
+    Value parse_number() {
+        ws();
+        size_t st = i;
+        if (peek() == '-') i++;
+
+        if (peek() == '0') {
+            i++;
+            if (std::isdigit(static_cast<unsigned char>(peek()))) err("leading zero");
+        } else {
+            if (!std::isdigit(static_cast<unsigned char>(peek()))) err("expected digit");
+            while (std::isdigit(static_cast<unsigned char>(peek()))) i++;
+        }
+
+        bool is_float = false;
+        if (peek() == '.') {
+            is_float = true;
+            i++;
+            if (!std::isdigit(static_cast<unsigned char>(peek()))) err("missing fraction digits");
+            while (std::isdigit(static_cast<unsigned char>(peek()))) i++;
+        }
+        if (peek() == 'e' || peek() == 'E') {
+            is_float = true;
+            i++;
+            if (peek() == '+' || peek() == '-') i++;
+            if (!std::isdigit(static_cast<unsigned char>(peek()))) err("missing exponent digits");
+            while (std::isdigit(static_cast<unsigned char>(peek()))) i++;
+        }
+
+        std::string n = s.substr(st, i - st);
+        if (is_float) return Value(std::stod(n));
+        return Value(static_cast<long>(std::stoll(n)));
+    }
+    Value parse_array() {
+        eat('[');
+        Value a(ObjectType::LIST);
+        ws();
+        if (eat(']')) return a;
+        while (true) {
+            a.data.list.push_back(parse_value());
+            ws();
+            if (eat(']')) break;
+            if (!eat(',')) err("expected ',' in array");
+        }
+        return a;
+    }
+    Value parse_object() {
+        eat('{');
+        Value o(ObjectType::MAP);
+        ws();
+        if (eat('}')) return o;
+        while (true) {
+            ws();
+            std::string k = parse_string();
+            if (!eat(':')) err("expected ':'");
+            o.data.map[k] = parse_value();
+            ws();
+            if (eat('}')) break;
+            if (!eat(',')) err("expected ',' in object");
+        }
+        return o;
+    }
+public:
+    explicit JsonParser(const std::string& src) : s(src) {}
+    Value parse_value() {
+        ws();
+        char c = peek();
+        if (c == '"') return Value(parse_string());
+        if (c == '{') return parse_object();
+        if (c == '[') return parse_array();
+        if (c == '-' || std::isdigit(c)) return parse_number();
+        if (s.compare(i, 4, "true") == 0) { i += 4; return Value(true); }
+        if (s.compare(i, 5, "false") == 0) { i += 5; return Value(false); }
+        if (s.compare(i, 4, "null") == 0) { i += 4; return Value(); }
+        err("invalid token");
+    }
+    Value parse() {
+        Value v = parse_value();
+        ws();
+        if (i != s.size()) err("trailing characters");
+        return v;
+    }
+};
+
+static std::string stringify_value(const Value& v) {
+    switch (v.type) {
+        case ObjectType::NONE: return "null";
+        case ObjectType::BOOLEAN: return v.data.boolean ? "true" : "false";
+        case ObjectType::INTEGER: return std::to_string(v.data.integer);
+        case ObjectType::FLOAT: { std::ostringstream ss; ss << v.data.floating; return ss.str(); }
+        case ObjectType::STRING: {
+            std::string out = "\"";
+            for (char c : v.data.string) {
+                if (c == '"' || c == '\\') out.push_back('\\');
+                out.push_back(c);
+            }
+            out.push_back('"');
+            return out;
+        }
+        case ObjectType::LIST: {
+            std::string out = "[";
+            for (size_t i = 0; i < v.data.list.size(); ++i) {
+                if (i) out += ",";
+                out += stringify_value(v.data.list[i]);
+            }
+            out += "]";
+            return out;
+        }
+        case ObjectType::MAP: {
+            std::string out = "{";
+            bool first = true;
+            for (const auto& kv : v.data.map) {
+                if (!first) out += ",";
+                first = false;
+                out += stringify_value(Value(kv.first));
+                out += ":";
+                out += stringify_value(kv.second);
+            }
+            out += "}";
+            return out;
+        }
+        default: return stringify_value(Value(v.to_string()));
+    }
+}
+
+Value builtin_json_parse(const std::vector<Value>& args) { JsonParser p(to_string(args.at(0))); return p.parse(); }
+Value builtin_json_stringify(const std::vector<Value>& args) { return Value(stringify_value(args.at(0))); }
+Value create_json_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["parse"] = make_builtin("parse", "json_parse", {"text"});
+    m.data.map["stringify"] = make_builtin("stringify", "json_stringify", {"value"});
+    return m;
+}
+} // namespace json_bindings
+
+// ============================================================================
+// NET + THREAD + CHANNEL BINDINGS
+// ============================================================================
+namespace net_bindings {
+using namespace native_module_util;
+
+struct SocketRec { int fd; bool udp; };
+static std::mutex g_net_mu;
+static std::unordered_map<long, SocketRec> g_sockets;
+static std::atomic<long> g_next_sid{1};
+
+static int take_fd(long sid, bool* is_udp = nullptr) {
+    std::lock_guard<std::mutex> lk(g_net_mu);
+    auto it = g_sockets.find(sid);
+    if (it == g_sockets.end()) return -1;
+    if (is_udp) *is_udp = it->second.udp;
+    return it->second.fd;
+}
+static long put_fd(int fd, bool udp) {
+    long sid = g_next_sid.fetch_add(1);
+    std::lock_guard<std::mutex> lk(g_net_mu);
+    g_sockets[sid] = SocketRec{fd, udp};
+    return sid;
+}
+static void erase_fd(long sid) {
+    std::lock_guard<std::mutex> lk(g_net_mu);
+    g_sockets.erase(sid);
+}
+static bool socket_would_block() {
+#ifdef _WIN32
+    int e = WSAGetLastError();
+    return e == WSAEWOULDBLOCK || e == WSAEINPROGRESS;
+#else
+    return errno == EWOULDBLOCK || errno == EAGAIN || errno == EINPROGRESS;
+#endif
+}
+static bool set_socket_nonblocking(int fd, bool enabled) {
+#ifdef _WIN32
+    u_long mode = enabled ? 1UL : 0UL;
+    return ioctlsocket(fd, FIONBIO, &mode) == 0;
+#else
+    int flags = fcntl(fd, F_GETFL, 0);
+    if (flags < 0) return false;
+    if (enabled) flags |= O_NONBLOCK;
+    else flags &= ~O_NONBLOCK;
+    return fcntl(fd, F_SETFL, flags) == 0;
+#endif
+}
+
+Value builtin_net_tcp_connect(const std::vector<Value>& args) {
+    std::string host = to_string(args.at(0));
+    std::string port = std::to_string(to_long(args.at(1)));
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host.c_str(), port.c_str(), &hints, &res) != 0) throw std::runtime_error("net.tcp_connect getaddrinfo failed");
+    int fd = -1;
+    for (addrinfo* p = res; p; p = p->ai_next) {
+        fd = static_cast<int>(socket(p->ai_family, p->ai_socktype, p->ai_protocol));
+        if (fd < 0) continue;
+        if (connect(fd, p->ai_addr, p->ai_addrlen) == 0) break;
+#ifdef _WIN32
+        closesocket(fd);
+#else
+        close(fd);
+#endif
+        fd = -1;
+    }
+    freeaddrinfo(res);
+    if (fd < 0) throw std::runtime_error("net.tcp_connect connect failed");
+    return Value(put_fd(fd, false));
+}
+Value builtin_net_tcp_listen(const std::vector<Value>& args) {
+    std::string host = to_string(args.at(0));
+    std::string port = std::to_string(to_long(args.at(1)));
+    int backlog = args.size() >= 3 ? static_cast<int>(to_long(args.at(2))) : 128;
+    auto try_listen = [&](int family) -> int {
+        addrinfo hints{}, *res = nullptr;
+        hints.ai_family = family;
+        hints.ai_socktype = SOCK_STREAM;
+        hints.ai_flags = AI_PASSIVE;
+        const char* host_ptr = host.empty() ? nullptr : host.c_str();
+        if (getaddrinfo(host_ptr, port.c_str(), &hints, &res) != 0) return -1;
+
+        int fd = -1;
+        for (addrinfo* p = res; p; p = p->ai_next) {
+            fd = static_cast<int>(socket(p->ai_family, p->ai_socktype, p->ai_protocol));
+            if (fd < 0) continue;
+            int one = 1;
+            setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof(one));
+#ifdef SO_REUSEPORT
+            setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, reinterpret_cast<const char*>(&one), sizeof(one));
+#endif
+#ifdef IPV6_V6ONLY
+            if (p->ai_family == AF_INET6) {
+                int v6only = 0;
+                setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, reinterpret_cast<const char*>(&v6only), sizeof(v6only));
+            }
+#endif
+            if (bind(fd, p->ai_addr, p->ai_addrlen) == 0 && listen(fd, backlog) == 0) break;
+#ifdef _WIN32
+            closesocket(fd);
+#else
+            close(fd);
+#endif
+            fd = -1;
+        }
+        freeaddrinfo(res);
+        return fd;
+    };
+
+    int fd = try_listen(AF_INET);
+    if (fd < 0) fd = try_listen(AF_INET6);
+    if (fd < 0) {
+#ifdef _WIN32
+        throw std::runtime_error("net.tcp_listen bind/listen failed: " + std::to_string(WSAGetLastError()));
+#else
+        throw std::runtime_error("net.tcp_listen bind/listen failed: " + std::string(strerror(errno)));
+#endif
+    }
+    return Value(put_fd(fd, false));
+}
+Value builtin_net_tcp_accept(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_accept invalid socket");
+    sockaddr_storage ss{};
+#ifdef _WIN32
+    int slen = static_cast<int>(sizeof(ss));
+#else
+    socklen_t slen = sizeof(ss);
+#endif
+    int cfd = static_cast<int>(accept(fd, reinterpret_cast<sockaddr*>(&ss), &slen));
+    Value out(ObjectType::MAP);
+    if (cfd < 0) {
+        if (socket_would_block()) {
+            out.data.map["socket"] = Value(static_cast<long>(0));
+            out.data.map["host"] = Value("");
+            out.data.map["port"] = Value(static_cast<long>(0));
+            out.data.map["would_block"] = Value(true);
+            return out;
+        }
+        throw std::runtime_error("net.tcp_accept failed");
+    }
+    char host[NI_MAXHOST] = {0};
+    char serv[NI_MAXSERV] = {0};
+    int gi = getnameinfo(reinterpret_cast<sockaddr*>(&ss), slen, host, sizeof(host), serv, sizeof(serv), NI_NUMERICHOST | NI_NUMERICSERV);
+    out.data.map["socket"] = Value(put_fd(cfd, false));
+    out.data.map["host"] = Value(gi == 0 ? std::string(host) : std::string(""));
+    out.data.map["port"] = Value(static_cast<long>(gi == 0 ? std::strtol(serv, nullptr, 10) : 0));
+    out.data.map["would_block"] = Value(false);
+    return out;
+}
+Value builtin_net_tcp_try_accept(const std::vector<Value>& args) {
+    Value out(ObjectType::MAP);
+    out.data.map["ok"] = Value(false);
+    out.data.map["socket"] = Value(static_cast<long>(0));
+    out.data.map["host"] = Value("");
+    out.data.map["port"] = Value(static_cast<long>(0));
+    out.data.map["would_block"] = Value(false);
+    out.data.map["error"] = Value("");
+
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_try_accept invalid socket");
+    sockaddr_storage ss{};
+#ifdef _WIN32
+    int slen = static_cast<int>(sizeof(ss));
+#else
+    socklen_t slen = sizeof(ss);
+#endif
+    int cfd = static_cast<int>(accept(fd, reinterpret_cast<sockaddr*>(&ss), &slen));
+    if (cfd < 0) {
+        if (socket_would_block()) {
+            out.data.map["would_block"] = Value(true);
+            return out;
+        }
+        out.data.map["error"] = Value("accept failed");
+        return out;
+    }
+
+    char host[NI_MAXHOST] = {0};
+    char serv[NI_MAXSERV] = {0};
+    int gi = getnameinfo(reinterpret_cast<sockaddr*>(&ss), slen, host, sizeof(host), serv, sizeof(serv), NI_NUMERICHOST | NI_NUMERICSERV);
+    out.data.map["ok"] = Value(true);
+    out.data.map["socket"] = Value(put_fd(cfd, false));
+    out.data.map["host"] = Value(gi == 0 ? std::string(host) : std::string(""));
+    out.data.map["port"] = Value(static_cast<long>(gi == 0 ? std::strtol(serv, nullptr, 10) : 0));
+    return out;
+}
+Value builtin_net_set_nonblocking(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.set_nonblocking invalid socket");
+    bool enabled = args.size() >= 2 ? to_bool(args.at(1)) : true;
+    return Value(set_socket_nonblocking(fd, enabled));
+}
+Value builtin_net_tcp_send(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_send invalid socket");
+    std::string data = to_string(args.at(1));
+    int n = static_cast<int>(send(fd, data.data(), static_cast<int>(data.size()), 0));
+    if (n < 0) throw std::runtime_error("net.tcp_send failed");
+    return Value(static_cast<long>(n));
+}
+Value builtin_net_tcp_try_send(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_try_send invalid socket");
+    std::string data = to_string(args.at(1));
+    int n = static_cast<int>(send(fd, data.data(), static_cast<int>(data.size()), 0));
+    Value out(ObjectType::MAP);
+    out.data.map["ok"] = Value(false);
+    out.data.map["sent"] = Value(static_cast<long>(0));
+    out.data.map["would_block"] = Value(false);
+    out.data.map["error"] = Value("");
+    if (n > 0) {
+        out.data.map["ok"] = Value(true);
+        out.data.map["sent"] = Value(static_cast<long>(n));
+        return out;
+    }
+    if (n == 0) {
+        out.data.map["error"] = Value("send returned 0");
+        return out;
+    }
+    if (socket_would_block()) {
+        out.data.map["would_block"] = Value(true);
+        return out;
+    }
+    out.data.map["error"] = Value("send failed");
+    return out;
+}
+Value builtin_net_tcp_recv(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int maxb = args.size() >= 2 ? static_cast<int>(to_long(args[1])) : 4096;
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_recv invalid socket");
+    std::vector<char> buf(static_cast<size_t>(maxb));
+    int n = static_cast<int>(recv(fd, buf.data(), maxb, 0));
+    if (n <= 0) return Value("");
+    return Value(std::string(buf.data(), static_cast<size_t>(n)));
+}
+Value builtin_net_tcp_try_recv(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int maxb = args.size() >= 2 ? static_cast<int>(to_long(args[1])) : 4096;
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.tcp_try_recv invalid socket");
+
+    std::vector<char> buf(static_cast<size_t>(maxb));
+    int n = static_cast<int>(recv(fd, buf.data(), maxb, 0));
+    Value out(ObjectType::MAP);
+    out.data.map["ok"] = Value(false);
+    out.data.map["data"] = Value("");
+    out.data.map["closed"] = Value(false);
+    out.data.map["would_block"] = Value(false);
+    out.data.map["error"] = Value("");
+    if (n > 0) {
+        out.data.map["ok"] = Value(true);
+        out.data.map["data"] = Value(std::string(buf.data(), static_cast<size_t>(n)));
+        return out;
+    }
+    if (n == 0) {
+        out.data.map["closed"] = Value(true);
+        return out;
+    }
+    if (socket_would_block()) {
+        out.data.map["would_block"] = Value(true);
+        return out;
+    }
+    out.data.map["error"] = Value("recv failed");
+    return out;
+}
+Value builtin_net_tcp_close(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd >= 0) {
+#ifdef _WIN32
+        closesocket(fd);
+#else
+        close(fd);
+#endif
+        erase_fd(sid);
+    }
+    return Value(true);
+}
+Value builtin_net_udp_bind(const std::vector<Value>& args) {
+    int port = static_cast<int>(to_long(args.at(0)));
+    int fd = static_cast<int>(socket(AF_INET, SOCK_DGRAM, 0));
+    if (fd < 0) throw std::runtime_error("net.udp_bind socket failed");
+    sockaddr_in a{};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_port = htons(static_cast<uint16_t>(port));
+    if (bind(fd, reinterpret_cast<sockaddr*>(&a), sizeof(a)) != 0) throw std::runtime_error("net.udp_bind bind failed");
+    return Value(put_fd(fd, true));
+}
+Value builtin_net_udp_sendto(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.udp_sendto invalid socket");
+    std::string host = to_string(args.at(1));
+    int port = static_cast<int>(to_long(args.at(2)));
+    std::string data = to_string(args.at(3));
+    sockaddr_in dst{};
+    dst.sin_family = AF_INET;
+    dst.sin_port = htons(static_cast<uint16_t>(port));
+    if (inet_pton(AF_INET, host.c_str(), &dst.sin_addr) != 1) throw std::runtime_error("net.udp_sendto invalid ipv4 address");
+    int n = static_cast<int>(sendto(fd, data.data(), static_cast<int>(data.size()), 0, reinterpret_cast<sockaddr*>(&dst), sizeof(dst)));
+    if (n < 0) throw std::runtime_error("net.udp_sendto failed");
+    return Value(static_cast<long>(n));
+}
+Value builtin_net_udp_recvfrom(const std::vector<Value>& args) {
+    long sid = to_long(args.at(0));
+    int maxb = args.size() >= 2 ? static_cast<int>(to_long(args[1])) : 4096;
+    int fd = take_fd(sid);
+    if (fd < 0) throw std::runtime_error("net.udp_recvfrom invalid socket");
+    std::vector<char> buf(static_cast<size_t>(maxb));
+    sockaddr_in src{};
+    socklen_t slen = sizeof(src);
+    int n = static_cast<int>(recvfrom(fd, buf.data(), maxb, 0, reinterpret_cast<sockaddr*>(&src), &slen));
+    Value m(ObjectType::MAP);
+    if (n <= 0) {
+        m.data.map["data"] = Value("");
+        m.data.map["host"] = Value("");
+        m.data.map["port"] = Value(static_cast<long>(0));
+        return m;
+    }
+    char ip[INET_ADDRSTRLEN] = {0};
+    inet_ntop(AF_INET, &src.sin_addr, ip, sizeof(ip));
+    m.data.map["data"] = Value(std::string(buf.data(), static_cast<size_t>(n)));
+    m.data.map["host"] = Value(std::string(ip));
+    m.data.map["port"] = Value(static_cast<long>(ntohs(src.sin_port)));
+    return m;
+}
+Value builtin_net_udp_close(const std::vector<Value>& args) { return builtin_net_tcp_close(args); }
+Value builtin_net_dns_lookup(const std::vector<Value>& args) {
+    std::string host = to_string(args.at(0));
+    addrinfo hints{}, *res = nullptr;
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    int rc = getaddrinfo(host.c_str(), nullptr, &hints, &res);
+    if (rc != 0) throw std::runtime_error("net.dns_lookup getaddrinfo failed");
+    Value out(ObjectType::LIST);
+    std::unordered_set<std::string> seen;
+    for (addrinfo* p = res; p; p = p->ai_next) {
+        char hostbuf[NI_MAXHOST] = {0};
+        if (getnameinfo(p->ai_addr, p->ai_addrlen, hostbuf, sizeof(hostbuf), nullptr, 0, NI_NUMERICHOST) == 0) {
+            if (seen.insert(hostbuf).second) out.data.list.emplace_back(std::string(hostbuf));
+        }
+    }
+    freeaddrinfo(res);
+    return out;
+}
+Value create_net_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["tcp_connect"] = make_builtin("tcp_connect", "net_tcp_connect", {"host", "port"});
+    m.data.map["tcp_listen"] = make_builtin("tcp_listen", "net_tcp_listen", {"host", "port", "backlog"});
+    m.data.map["tcp_accept"] = make_builtin("tcp_accept", "net_tcp_accept", {"listener"});
+    m.data.map["tcp_try_accept"] = make_builtin("tcp_try_accept", "net_tcp_try_accept", {"listener"});
+    m.data.map["set_nonblocking"] = make_builtin("set_nonblocking", "net_set_nonblocking", {"socket", "enabled"});
+    m.data.map["tcp_send"] = make_builtin("tcp_send", "net_tcp_send", {"socket", "data"});
+    m.data.map["tcp_try_send"] = make_builtin("tcp_try_send", "net_tcp_try_send", {"socket", "data"});
+    m.data.map["tcp_recv"] = make_builtin("tcp_recv", "net_tcp_recv", {"socket", "max_bytes"});
+    m.data.map["tcp_try_recv"] = make_builtin("tcp_try_recv", "net_tcp_try_recv", {"socket", "max_bytes"});
+    m.data.map["tcp_close"] = make_builtin("tcp_close", "net_tcp_close", {"socket"});
+    m.data.map["udp_bind"] = make_builtin("udp_bind", "net_udp_bind", {"port"});
+    m.data.map["udp_sendto"] = make_builtin("udp_sendto", "net_udp_sendto", {"socket", "host", "port", "data"});
+    m.data.map["udp_recvfrom"] = make_builtin("udp_recvfrom", "net_udp_recvfrom", {"socket", "max_bytes"});
+    m.data.map["udp_close"] = make_builtin("udp_close", "net_udp_close", {"socket"});
+    m.data.map["dns_lookup"] = make_builtin("dns_lookup", "net_dns_lookup", {"host"});
+    return m;
+}
+} // namespace net_bindings
+
+namespace thread_bindings {
+using namespace native_module_util;
+static std::mutex g_task_mu;
+static std::unordered_map<long, std::future<long>> g_tasks;
+static std::atomic<long> g_next_tid{1};
+
+Value builtin_thread_spawn(const std::vector<Value>& args) {
+    std::string cmd = to_string(args.at(0));
+    long id = g_next_tid.fetch_add(1);
+    std::future<long> fut = std::async(std::launch::async, [cmd]() -> long {
+        return static_cast<long>(std::system(cmd.c_str()));
+    });
+    std::lock_guard<std::mutex> lk(g_task_mu);
+    g_tasks.emplace(id, std::move(fut));
+    return Value(id);
+}
+Value builtin_thread_join(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    std::future<long> fut;
+    {
+        std::lock_guard<std::mutex> lk(g_task_mu);
+        auto it = g_tasks.find(id);
+        if (it == g_tasks.end()) throw std::runtime_error("thread.join invalid id");
+        fut = std::move(it->second);
+        g_tasks.erase(it);
+    }
+    return Value(fut.get());
+}
+Value builtin_thread_is_done(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    std::lock_guard<std::mutex> lk(g_task_mu);
+    auto it = g_tasks.find(id);
+    if (it == g_tasks.end()) return Value(true);
+    return Value(it->second.wait_for(std::chrono::seconds(0)) == std::future_status::ready);
+}
+Value builtin_thread_sleep(const std::vector<Value>& args) {
+    long ms = to_long(args.at(0));
+    std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+    return Value();
+}
+Value create_thread_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["spawn"] = make_builtin("spawn", "thread_spawn", {"command"});
+    m.data.map["join"] = make_builtin("join", "thread_join", {"task_id"});
+    m.data.map["is_done"] = make_builtin("is_done", "thread_is_done", {"task_id"});
+    m.data.map["sleep"] = make_builtin("sleep", "thread_sleep", {"ms"});
+    return m;
+}
+} // namespace thread_bindings
+
+namespace channel_bindings {
+using namespace native_module_util;
+struct Chan {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::deque<Value> q;
+    size_t cap = 0; // 0 => unbounded
+    bool closed = false;
+};
+static std::mutex g_chan_mu;
+static std::unordered_map<long, std::shared_ptr<Chan>> g_chans;
+static std::atomic<long> g_next_cid{1};
+static std::shared_ptr<Chan> get_chan(long id) {
+    std::lock_guard<std::mutex> lk(g_chan_mu);
+    auto it = g_chans.find(id);
+    if (it == g_chans.end()) return nullptr;
+    return it->second;
+}
+Value builtin_channel_create(const std::vector<Value>& args) {
+    auto c = std::make_shared<Chan>();
+    c->cap = args.empty() ? 0 : static_cast<size_t>(std::max<long>(0, to_long(args[0])));
+    long id = g_next_cid.fetch_add(1);
+    std::lock_guard<std::mutex> lk(g_chan_mu);
+    g_chans[id] = c;
+    return Value(id);
+}
+Value builtin_channel_send(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto c = get_chan(id);
+    if (!c) throw std::runtime_error("channel.send invalid id");
+    std::unique_lock<std::mutex> lk(c->mu);
+    c->cv.wait(lk, [&]{ return c->closed || c->cap == 0 || c->q.size() < c->cap; });
+    if (c->closed) return Value(false);
+    c->q.push_back(args.at(1));
+    c->cv.notify_all();
+    return Value(true);
+}
+Value builtin_channel_recv(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    long timeout_ms = args.size() >= 2 ? to_long(args[1]) : -1;
+    auto c = get_chan(id);
+    if (!c) throw std::runtime_error("channel.recv invalid id");
+    std::unique_lock<std::mutex> lk(c->mu);
+    if (timeout_ms < 0) {
+        c->cv.wait(lk, [&]{ return c->closed || !c->q.empty(); });
+    } else {
+        c->cv.wait_for(lk, std::chrono::milliseconds(timeout_ms), [&]{ return c->closed || !c->q.empty(); });
+    }
+    if (c->q.empty()) return Value();
+    Value v = c->q.front();
+    c->q.pop_front();
+    c->cv.notify_all();
+    return v;
+}
+Value builtin_channel_try_recv(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto c = get_chan(id);
+    if (!c) throw std::runtime_error("channel.try_recv invalid id");
+    std::lock_guard<std::mutex> lk(c->mu);
+    if (c->q.empty()) return Value();
+    Value v = c->q.front();
+    c->q.pop_front();
+    c->cv.notify_all();
+    return v;
+}
+Value builtin_channel_close(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto c = get_chan(id);
+    if (!c) return Value(false);
+    {
+        std::lock_guard<std::mutex> lk(c->mu);
+        c->closed = true;
+    }
+    c->cv.notify_all();
+    return Value(true);
+}
+Value create_channel_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["create"] = make_builtin("create", "channel_create", {"capacity"});
+    m.data.map["send"] = make_builtin("send", "channel_send", {"channel_id", "value"});
+    m.data.map["recv"] = make_builtin("recv", "channel_recv", {"channel_id", "timeout_ms"});
+    m.data.map["try_recv"] = make_builtin("try_recv", "channel_try_recv", {"channel_id"});
+    m.data.map["close"] = make_builtin("close", "channel_close", {"channel_id"});
+    return m;
+}
+} // namespace channel_bindings
+
+namespace async_bindings {
+using namespace native_module_util;
+
+enum class AsyncTaskKind {
+    PROCESS,
+    TIMER,
+    TCP_RECV,
+    TCP_SEND
+};
+
+struct AsyncTask {
+    AsyncTaskKind kind = AsyncTaskKind::TIMER;
+    bool done = false;
+    bool cancelled = false;
+    bool ok = true;
+    std::string error;
+    Value result;
+    std::chrono::steady_clock::time_point due_at{};
+    std::shared_ptr<std::future<long>> process_future;
+    long socket_id = 0;
+    int max_bytes = 4096;
+    std::string send_data;
+    size_t send_offset = 0;
+};
+
+static std::mutex g_async_mu;
+static std::unordered_map<long, std::shared_ptr<AsyncTask>> g_async_tasks;
+static std::atomic<long> g_async_next_id{1};
+
+static std::shared_ptr<AsyncTask> find_task(long id) {
+    std::lock_guard<std::mutex> lk(g_async_mu);
+    auto it = g_async_tasks.find(id);
+    if (it == g_async_tasks.end()) return nullptr;
+    return it->second;
+}
+
+static long add_task(const std::shared_ptr<AsyncTask>& t) {
+    long id = g_async_next_id.fetch_add(1);
+    std::lock_guard<std::mutex> lk(g_async_mu);
+    g_async_tasks[id] = t;
+    return id;
+}
+
+static bool poll_task(std::shared_ptr<AsyncTask>& task) {
+    if (!task || task->done || task->cancelled) return false;
+    bool changed = false;
+    switch (task->kind) {
+        case AsyncTaskKind::TIMER: {
+            auto now = std::chrono::steady_clock::now();
+            if (now >= task->due_at) {
+                task->done = true;
+                task->result = Value(true);
+                changed = true;
+            }
+            break;
+        }
+        case AsyncTaskKind::PROCESS: {
+            if (!task->process_future) {
+                task->done = true;
+                task->ok = false;
+                task->error = "missing process future";
+                changed = true;
+                break;
+            }
+            if (task->process_future->wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+                long code = task->process_future->get();
+                Value out(ObjectType::MAP);
+                out.data.map["exit_code"] = Value(code);
+                out.data.map["ok"] = Value(code == 0);
+                task->result = out;
+                task->done = true;
+                changed = true;
+            }
+            break;
+        }
+        case AsyncTaskKind::TCP_RECV: {
+            Value out = net_bindings::builtin_net_tcp_try_recv({Value(task->socket_id), Value(static_cast<long>(task->max_bytes))});
+            if (out.type != ObjectType::MAP) break;
+            bool would_block = out.data.map.count("would_block") ? to_bool(out.data.map["would_block"]) : false;
+            bool ok = out.data.map.count("ok") ? to_bool(out.data.map["ok"]) : false;
+            bool closed = out.data.map.count("closed") ? to_bool(out.data.map["closed"]) : false;
+            std::string err = out.data.map.count("error") ? to_string(out.data.map["error"]) : "";
+            if (ok || closed || !err.empty()) {
+                task->done = true;
+                task->ok = ok || closed;
+                if (!task->ok && !err.empty()) task->error = err;
+                task->result = out;
+                changed = true;
+            } else if (!would_block) {
+                task->done = true;
+                task->ok = false;
+                task->error = "tcp recv failed";
+                task->result = out;
+                changed = true;
+            }
+            break;
+        }
+        case AsyncTaskKind::TCP_SEND: {
+            if (task->send_offset >= task->send_data.size()) {
+                task->done = true;
+                Value out(ObjectType::MAP);
+                out.data.map["ok"] = Value(true);
+                out.data.map["sent"] = Value(static_cast<long>(task->send_offset));
+                task->result = out;
+                changed = true;
+                break;
+            }
+            std::string chunk = task->send_data.substr(task->send_offset);
+            Value out = net_bindings::builtin_net_tcp_try_send({Value(task->socket_id), Value(chunk)});
+            if (out.type != ObjectType::MAP) break;
+            bool would_block = out.data.map.count("would_block") ? to_bool(out.data.map["would_block"]) : false;
+            bool ok = out.data.map.count("ok") ? to_bool(out.data.map["ok"]) : false;
+            long sent = out.data.map.count("sent") ? to_long(out.data.map["sent"]) : 0;
+            std::string err = out.data.map.count("error") ? to_string(out.data.map["error"]) : "";
+            if (ok && sent > 0) {
+                task->send_offset += static_cast<size_t>(sent);
+                if (task->send_offset >= task->send_data.size()) {
+                    task->done = true;
+                    Value done_out(ObjectType::MAP);
+                    done_out.data.map["ok"] = Value(true);
+                    done_out.data.map["sent"] = Value(static_cast<long>(task->send_offset));
+                    task->result = done_out;
+                    changed = true;
+                }
+            } else if (!would_block) {
+                task->done = true;
+                task->ok = false;
+                task->error = err.empty() ? "tcp send failed" : err;
+                task->result = out;
+                changed = true;
+            }
+            break;
+        }
+    }
+    return changed;
+}
+
+static long tick_tasks(long budget = 256) {
+    if (budget <= 0) budget = 1;
+    long completed_now = 0;
+    std::vector<std::shared_ptr<AsyncTask>> snapshot;
+    snapshot.reserve(static_cast<size_t>(budget));
+    {
+        std::lock_guard<std::mutex> lk(g_async_mu);
+        for (const auto& kv : g_async_tasks) {
+            if (snapshot.size() >= static_cast<size_t>(budget)) break;
+            snapshot.push_back(kv.second);
+        }
+    }
+    for (auto& t : snapshot) {
+        bool was_done = t->done;
+        if (poll_task(t) && !was_done && t->done) completed_now++;
+    }
+    return completed_now;
+}
+
+static Value task_status_map(long id, const std::shared_ptr<AsyncTask>& task) {
+    Value m(ObjectType::MAP);
+    m.data.map["id"] = Value(id);
+    if (!task) {
+        m.data.map["exists"] = Value(false);
+        m.data.map["done"] = Value(true);
+        m.data.map["ok"] = Value(false);
+        m.data.map["cancelled"] = Value(false);
+        m.data.map["error"] = Value("task not found");
+        m.data.map["result"] = Value();
+        return m;
+    }
+    m.data.map["exists"] = Value(true);
+    m.data.map["done"] = Value(task->done);
+    m.data.map["ok"] = Value(task->ok);
+    m.data.map["cancelled"] = Value(task->cancelled);
+    m.data.map["error"] = Value(task->error);
+    m.data.map["result"] = task->result;
+    return m;
+}
+
+Value builtin_async_spawn(const std::vector<Value>& args) {
+    std::string cmd = to_string(args.at(0));
+    auto task = std::make_shared<AsyncTask>();
+    task->kind = AsyncTaskKind::PROCESS;
+    task->process_future = std::make_shared<std::future<long>>(
+        std::async(std::launch::async, [cmd]() -> long { return static_cast<long>(std::system(cmd.c_str())); })
+    );
+    return Value(add_task(task));
+}
+
+Value builtin_async_sleep(const std::vector<Value>& args) {
+    long ms = to_long(args.at(0));
+    if (ms < 0) ms = 0;
+    auto task = std::make_shared<AsyncTask>();
+    task->kind = AsyncTaskKind::TIMER;
+    task->due_at = std::chrono::steady_clock::now() + std::chrono::milliseconds(ms);
+    return Value(add_task(task));
+}
+
+Value builtin_async_tcp_recv(const std::vector<Value>& args) {
+    auto task = std::make_shared<AsyncTask>();
+    task->kind = AsyncTaskKind::TCP_RECV;
+    task->socket_id = to_long(args.at(0));
+    task->max_bytes = args.size() >= 2 ? static_cast<int>(to_long(args.at(1))) : 4096;
+    return Value(add_task(task));
+}
+
+Value builtin_async_tcp_send(const std::vector<Value>& args) {
+    auto task = std::make_shared<AsyncTask>();
+    task->kind = AsyncTaskKind::TCP_SEND;
+    task->socket_id = to_long(args.at(0));
+    task->send_data = to_string(args.at(1));
+    task->send_offset = 0;
+    return Value(add_task(task));
+}
+
+Value builtin_async_tick(const std::vector<Value>& args) {
+    long budget = args.empty() ? 256 : to_long(args.at(0));
+    return Value(tick_tasks(budget));
+}
+
+Value builtin_async_done(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto task = find_task(id);
+    if (!task) return Value(true);
+    poll_task(task);
+    return Value(task->done || task->cancelled);
+}
+
+Value builtin_async_status(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto task = find_task(id);
+    if (task) poll_task(task);
+    return task_status_map(id, task);
+}
+
+Value builtin_async_result(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto task = find_task(id);
+    if (!task) throw std::runtime_error("async.result: task not found");
+    poll_task(task);
+    if (!task->done) return Value();
+    if (!task->ok && !task->error.empty()) throw std::runtime_error("async.result: " + task->error);
+    return task->result;
+}
+
+Value builtin_async_cancel(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    auto task = find_task(id);
+    if (!task) return Value(false);
+    task->cancelled = true;
+    task->done = true;
+    task->ok = false;
+    task->error = "cancelled";
+    return Value(true);
+}
+
+Value builtin_async_pending(const std::vector<Value>&) {
+    long n = 0;
+    std::vector<std::shared_ptr<AsyncTask>> snapshot;
+    {
+        std::lock_guard<std::mutex> lk(g_async_mu);
+        for (const auto& kv : g_async_tasks) snapshot.push_back(kv.second);
+    }
+    for (auto& t : snapshot) {
+        poll_task(t);
+        if (!t->done && !t->cancelled) n++;
+    }
+    return Value(n);
+}
+
+Value builtin_async_await(const std::vector<Value>& args) {
+    long id = to_long(args.at(0));
+    long timeout_ms = args.size() >= 2 ? to_long(args.at(1)) : -1;
+    auto task = find_task(id);
+    if (!task) throw std::runtime_error("async.await: task not found");
+    auto start = std::chrono::steady_clock::now();
+    while (true) {
+        poll_task(task);
+        if (task->done || task->cancelled) break;
+        tick_tasks(256);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (timeout_ms >= 0) {
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= timeout_ms) {
+                throw std::runtime_error("async.await: timeout");
+            }
+        }
+    }
+    if (!task->ok && !task->error.empty()) throw std::runtime_error("async.await: " + task->error);
+    return task->result;
+}
+
+Value create_async_module() {
+    Value m(ObjectType::MAP);
+    m.data.map["spawn"] = make_builtin("spawn", "async_spawn", {"command"});
+    m.data.map["sleep"] = make_builtin("sleep", "async_sleep", {"ms"});
+    m.data.map["tcp_recv"] = make_builtin("tcp_recv", "async_tcp_recv", {"socket", "max_bytes"});
+    m.data.map["tcp_send"] = make_builtin("tcp_send", "async_tcp_send", {"socket", "data"});
+    m.data.map["tick"] = make_builtin("tick", "async_tick", {"budget"});
+    m.data.map["done"] = make_builtin("done", "async_done", {"task_id"});
+    m.data.map["status"] = make_builtin("status", "async_status", {"task_id"});
+    m.data.map["result"] = make_builtin("result", "async_result", {"task_id"});
+    m.data.map["cancel"] = make_builtin("cancel", "async_cancel", {"task_id"});
+    m.data.map["pending"] = make_builtin("pending", "async_pending", {});
+    m.data.map["await"] = make_builtin("await", "async_await", {"task_id", "timeout_ms"});
+    return m;
+}
+} // namespace async_bindings
 
 // ============================================================================
 // BYTECODE COMPILER - Transforms AST to bytecode
@@ -5215,6 +8460,7 @@ private:
             case NodeType::CLASS: {
                 // Create class object
                 ObjClass* klass = ObjClass::create(node->class_name.c_str());
+                klass->is_abstract = node->is_abstract;
                 
                 // Handle inheritance (first child may be parent class reference)
                 size_t start_idx = 0;
@@ -5231,6 +8477,10 @@ private:
                 for (size_t i = start_idx; i < node->children.size(); ++i) {
                     ASTNode* method_node = node->children[i].get();
                     if (method_node && method_node->type == NodeType::FUNCTION) {
+                        if (method_node->is_abstract) {
+                            klass->abstract_methods.insert(method_node->value);
+                            continue;
+                        }
                         // Compile method with special handling for 'self'
                         Compiler mc;
                         auto mchunk = mc.compile_method(method_node);
@@ -5244,6 +8494,7 @@ private:
                         ObjFunc* mfunc = make_func(owned_chunk, method_node->value.c_str(), 
                                                    method_node->params.size());
                         klass->methods[method_node->value] = val_func(mfunc);
+                        klass->abstract_methods.erase(method_node->value);
                         
                         // Track init arity
                         if (method_node->value == "init") {
@@ -5290,8 +8541,50 @@ private:
                 emit_short(name_idx);
                 break;
             }
+            case NodeType::MAP: {
+                // Stack layout for OP_BUILD_MAP: key1, value1, key2, value2, ...
+                for (auto& child : node->children) {
+                    compile_node(child.get());
+                }
+                emit(OpCode::OP_BUILD_MAP);
+                emit_byte(static_cast<uint8_t>(node->children.size() / 2));
+                break;
+            }
             case NodeType::CALL: {
+                if (node->children[0]->type == NodeType::GET_ATTR) {
+                    // Method call: obj.method(args)
+                    ASTNode* get_attr = node->children[0].get();
+                    std::string method_name = get_attr->value;
+
+                    // Compile object receiver first
+                    compile_node(get_attr->children[0].get());
+
+                    // Compile call arguments
+                    for (size_t i = 1; i < node->children.size(); i++) {
+                        compile_node(node->children[i].get());
+                    }
+
+                    size_t method_idx = chunk->add_constant(Value(method_name));
+                    emit(OpCode::OP_METHOD_CALL);
+                    emit_byte(node->children.size() - 1);  // argc
+                    emit_short(method_idx);
+                    break;
+                }
+
                 std::string name = node->children[0]->token.lexeme;
+                if (name == "await") {
+                    // Rewrite await(task, timeout?) => import async; async.await(task, timeout?)
+                    size_t module_idx = chunk->add_constant(Value("async"));
+                    emit(OpCode::OP_IMPORT);
+                    emit_short(module_idx);
+                    for (size_t i = 1; i < node->children.size(); i++) {
+                        compile_node(node->children[i].get());
+                    }
+                    size_t method_idx = chunk->add_constant(Value("await"));
+                    emit(OpCode::OP_METHOD_CALL);
+                    emit_byte(node->children.size() - 1);
+                    emit_short(method_idx);
+                } else
                 if (name == "say" && node->children.size() == 2) {
                     compile_node(node->children[1].get());
                     emit(OpCode::OP_BUILTIN_SAY);
@@ -5330,6 +8623,28 @@ private:
                 } else if (name == "type" && node->children.size() == 2) {
                     compile_node(node->children[1].get());
                     emit(OpCode::OP_BUILTIN_TYPE);
+                } else if (name == "isinstance" && node->children.size() == 3) {
+                    compile_node(node->children[1].get());
+                    compile_node(node->children[2].get());
+                    emit(OpCode::OP_BUILTIN_ISINSTANCE);
+                } else if (name == "hasattr" && node->children.size() == 3) {
+                    compile_node(node->children[1].get());
+                    compile_node(node->children[2].get());
+                    emit(OpCode::OP_BUILTIN_HASATTR);
+                } else if (name == "getattr" &&
+                           (node->children.size() == 3 || node->children.size() == 4)) {
+                    compile_node(node->children[1].get());  // object
+                    compile_node(node->children[2].get());  // attr name
+                    if (node->children.size() == 4) {
+                        compile_node(node->children[3].get());  // default
+                    }
+                    emit(OpCode::OP_BUILTIN_GETATTR);
+                    emit_byte(static_cast<uint8_t>(node->children.size() - 1)); // 2 or 3 args
+                } else if (name == "setattr" && node->children.size() == 4) {
+                    compile_node(node->children[1].get());
+                    compile_node(node->children[2].get());
+                    compile_node(node->children[3].get());
+                    emit(OpCode::OP_BUILTIN_SETATTR);
                 // Additional built-ins for FastVM
                 } else if (name == "time" && node->children.size() == 1) {
                     emit(OpCode::OP_BUILTIN_TIME);
@@ -5433,6 +8748,9 @@ private:
                     compile_node(node->children[1].get());
                     compile_node(node->children[2].get());
                     emit(OpCode::OP_BUILTIN_ENDSWITH);
+                } else if (name == "keys" && node->children.size() == 2) {
+                    compile_node(node->children[1].get());
+                    emit(OpCode::OP_BUILTIN_KEYS);
                 } else if (name == "enumerate" && node->children.size() == 2) {
                     compile_node(node->children[1].get());
                     emit(OpCode::OP_BUILTIN_ENUMERATE);
@@ -5590,24 +8908,6 @@ private:
                     compile_node(node->children[1].get());  // filename
                     compile_node(node->children[2].get());  // mode
                     emit(OpCode::OP_FILE_OPEN);
-                } else if (node->children[0]->type == NodeType::GET_ATTR) {
-                    // Method call: obj.method(args)
-                    ASTNode* get_attr = node->children[0].get();
-                    std::string method_name = get_attr->value;
-                    
-                    // Compile the object
-                    compile_node(get_attr->children[0].get());
-                    
-                    // Compile arguments
-                    for (size_t i = 1; i < node->children.size(); i++) {
-                        compile_node(node->children[i].get());
-                    }
-                    
-                    // Emit method call
-                    size_t method_idx = chunk->add_constant(Value(method_name));
-                    emit(OpCode::OP_METHOD_CALL);
-                    emit_byte(node->children.size() - 1);  // argc
-                    emit_short(method_idx);
                 } else {
                     compile_node(node->children[0].get());
                     for (size_t i = 1; i < node->children.size(); i++)
@@ -5626,6 +8926,12 @@ private:
                 compile_node(node->children[0].get());
                 emit(OpCode::OP_BUILTIN_SAY);
                 break;
+            case NodeType::IMPORT: {
+              size_t module_name_idx = chunk->add_constant(Value(node->value));
+              emit(OpCode::OP_IMPORT);
+              emit_short(module_name_idx);
+              break;
+            }
             case NodeType::INDEX:
                 compile_node(node->children[0].get());
                 compile_node(node->children[1].get());
@@ -5647,6 +8953,7 @@ class FastVM {
         Chunk* chunk;
         uint8_t* ip;
         uint64_t* slots;  // Direct pointer to frame's stack slots
+        const char* name;
     };
     
     // ========================================================================
@@ -5786,6 +9093,22 @@ class FastVM {
     
     // Name->interned string cache for fast global resolution
     std::unordered_map<std::string, ObjString*> name_cache;
+    ObjMap* http_module_map = nullptr;
+    ObjMap* os_module_map = nullptr;
+    ObjMap* fs_module_map = nullptr;
+    ObjMap* path_module_map = nullptr;
+    ObjMap* process_module_map = nullptr;
+    ObjMap* json_module_map = nullptr;
+    ObjMap* url_module_map = nullptr;
+    ObjMap* net_module_map = nullptr;
+    ObjMap* thread_module_map = nullptr;
+    ObjMap* channel_module_map = nullptr;
+    ObjMap* async_module_map = nullptr;
+    ObjMap* crypto_module_map = nullptr;
+    ObjMap* time_module_map = nullptr;
+    ObjMap* log_module_map = nullptr;
+    ObjMap* config_module_map = nullptr;
+    ObjMap* input_module_map = nullptr;
     
     // Iterator state
     struct FastIter { uint64_t obj; size_t idx; int64_t cur; int64_t stop; int64_t step; };
@@ -5822,6 +9145,7 @@ public:
         fp->chunk = chunk;
         fp->ip = chunk->code.data();
         fp->slots = stack.get();
+        fp->name = "<main>";
         frame_count = 1;
         return execute(chunk);
     }
@@ -5835,17 +9159,31 @@ public:
             case ObjectType::NONE: return VAL_NONE;
             case ObjectType::STRING: return val_string(g_strings.intern(v.data.string));
             case ObjectType::FUNCTION: {
-                ObjFunc* f = make_func(
-                    v.data.compiled_func.chunk.get(),
-                    v.data.compiled_func.name.c_str(),
-                    v.data.compiled_func.arity
-                );
-                return val_func(f);
+                if (v.data.compiled_func.chunk) {
+                    ObjFunc* f = make_func(
+                        v.data.compiled_func.chunk.get(),
+                        v.data.compiled_func.name.c_str(),
+                        v.data.compiled_func.arity
+                    );
+                    return val_func(f);
+                }
+                if (v.data.function.is_builtin) {
+                    return val_string("<builtin " + v.data.function.builtin_name + ">");
+                }
+                return VAL_NONE;
             }
             case ObjectType::LIST: {
                 ObjList* l = ObjList::create();
                 for (auto& item : v.data.list) l->push(from_value(item));
                 return val_list(l);
+            }
+            case ObjectType::MAP: {
+                ObjMap* m = ObjMap::create();
+                for (const auto& pair : v.data.map) {
+                    ObjString* key = intern_name(pair.first);
+                    m->data[key] = from_value(pair.second);
+                }
+                return val_map(m);
             }
             case ObjectType::RANGE: {
                 ObjRange* r = ObjRange::create(v.data.range.start, v.data.range.stop, v.data.range.step);
@@ -5863,7 +9201,434 @@ public:
         return s;
     }
 
+    Value to_value(uint64_t v) {
+        if (v == VAL_NONE) return Value();
+        if (v == VAL_TRUE) return Value(true);
+        if (v == VAL_FALSE) return Value(false);
+        if (is_int(v)) return Value(static_cast<long>(as_int(v)));
+        if (is_number(v)) return Value(as_number(v));
+        if (!is_obj(v)) return Value();
+
+        switch (obj_type(v)) {
+            case ObjType::STRING:
+                return Value(as_string(v)->str());
+            case ObjType::LIST: {
+                ObjList* list = as_list(v);
+                Value result(ObjectType::LIST);
+                result.data.list.reserve(list->count);
+                for (size_t i = 0; i < list->count; ++i) {
+                    result.data.list.push_back(to_value(list->items[i]));
+                }
+                return result;
+            }
+            case ObjType::MAP: {
+                ObjMap* map = as_map(v);
+                Value result(ObjectType::MAP);
+                for (const auto& pair : map->data) {
+                    result.data.map[pair.first->str()] = to_value(pair.second);
+                }
+                return result;
+            }
+            case ObjType::RANGE: {
+                Value result(ObjectType::RANGE);
+                ObjRange* range = as_range(v);
+                result.data.range.start = static_cast<long>(range->start);
+                result.data.range.stop = static_cast<long>(range->stop);
+                result.data.range.step = static_cast<long>(range->step);
+                return result;
+            }
+            default:
+                return Value(val_to_string(v));
+        }
+    }
+
+    ObjMap* ensure_http_module() {
+        if (http_module_map) return http_module_map;
+
+        http_module_map = ObjMap::create();
+        auto add_method = [&](const char* name) {
+            http_module_map->data[g_strings.intern(name)] = val_string(name);
+        };
+
+        add_method("get");
+        add_method("post");
+        add_method("put");
+        add_method("patch");
+        add_method("delete");
+        add_method("head");
+        add_method("request");
+        add_method("set_timeout");
+        add_method("set_verify_ssl");
+        return http_module_map;
+    }
+
+    ObjMap* ensure_os_module() {
+        if (os_module_map) return os_module_map;
+
+        os_module_map = ObjMap::create();
+        auto add_method = [&](const char* name) {
+            os_module_map->data[g_strings.intern(name)] = val_string(name);
+        };
+
+        add_method("name");
+        add_method("sep");
+        add_method("cwd");
+        add_method("chdir");
+        add_method("listdir");
+        add_method("exists");
+        add_method("is_file");
+        add_method("is_dir");
+        add_method("mkdir");
+        add_method("remove");
+        add_method("rmdir");
+        add_method("rename");
+        add_method("abspath");
+        add_method("getenv");
+        add_method("setenv");
+        add_method("unsetenv");
+        return os_module_map;
+    }
+
+    ObjMap* ensure_fs_module() {
+        if (fs_module_map) return fs_module_map;
+        fs_module_map = ObjMap::create();
+        const char* names[] = {"exists","is_file","is_dir","mkdir","remove","rmdir","listdir","read_text","write_text","append_text","copy","move","abspath"};
+        for (const char* n : names) fs_module_map->data[g_strings.intern(n)] = val_string(n);
+        return fs_module_map;
+    }
+
+    ObjMap* ensure_path_module() {
+        if (path_module_map) return path_module_map;
+        path_module_map = ObjMap::create();
+        const char* names[] = {"join","basename","dirname","ext","stem","norm","abspath","exists","is_file","is_dir","read_text","write_text","listdir","mkdir","remove","rmdir"};
+        for (const char* n : names) path_module_map->data[g_strings.intern(n)] = val_string(n);
+        return path_module_map;
+    }
+
+    ObjMap* ensure_process_module() {
+        if (process_module_map) return process_module_map;
+        process_module_map = ObjMap::create();
+        const char* names[] = {"getpid","run","cwd","chdir","getenv","setenv","unsetenv"};
+        for (const char* n : names) process_module_map->data[g_strings.intern(n)] = val_string(n);
+        return process_module_map;
+    }
+
+    ObjMap* ensure_json_module() {
+        if (json_module_map) return json_module_map;
+        json_module_map = ObjMap::create();
+        const char* names[] = {"parse","stringify"};
+        for (const char* n : names) json_module_map->data[g_strings.intern(n)] = val_string(n);
+        return json_module_map;
+    }
+
+    ObjMap* ensure_url_module() {
+        if (url_module_map) return url_module_map;
+        url_module_map = ObjMap::create();
+        const char* names[] = {"parse","encode","decode"};
+        for (const char* n : names) url_module_map->data[g_strings.intern(n)] = val_string(n);
+        return url_module_map;
+    }
+
+    ObjMap* ensure_net_module() {
+        if (net_module_map) return net_module_map;
+        net_module_map = ObjMap::create();
+        const char* names[] = {"tcp_connect","tcp_listen","tcp_accept","tcp_try_accept","set_nonblocking","tcp_send","tcp_try_send","tcp_recv","tcp_try_recv","tcp_close","udp_bind","udp_sendto","udp_recvfrom","udp_close","dns_lookup"};
+        for (const char* n : names) net_module_map->data[g_strings.intern(n)] = val_string(n);
+        return net_module_map;
+    }
+
+    ObjMap* ensure_thread_module() {
+        if (thread_module_map) return thread_module_map;
+        thread_module_map = ObjMap::create();
+        const char* names[] = {"spawn","join","is_done","sleep"};
+        for (const char* n : names) thread_module_map->data[g_strings.intern(n)] = val_string(n);
+        return thread_module_map;
+    }
+
+    ObjMap* ensure_channel_module() {
+        if (channel_module_map) return channel_module_map;
+        channel_module_map = ObjMap::create();
+        const char* names[] = {"create","send","recv","try_recv","close"};
+        for (const char* n : names) channel_module_map->data[g_strings.intern(n)] = val_string(n);
+        return channel_module_map;
+    }
+
+    ObjMap* ensure_async_module() {
+        if (async_module_map) return async_module_map;
+        async_module_map = ObjMap::create();
+        const char* names[] = {"spawn","sleep","tcp_recv","tcp_send","tick","done","status","result","cancel","pending","await"};
+        for (const char* n : names) async_module_map->data[g_strings.intern(n)] = val_string(n);
+        return async_module_map;
+    }
+
+    ObjMap* ensure_crypto_module() {
+        if (crypto_module_map) return crypto_module_map;
+        crypto_module_map = ObjMap::create();
+        const char* names[] = {"sha256","sha512","hmac_sha256","random_bytes","hex_encode","hex_decode","base64_encode","base64_decode"};
+        for (const char* n : names) crypto_module_map->data[g_strings.intern(n)] = val_string(n);
+        return crypto_module_map;
+    }
+
+    ObjMap* ensure_time_module() {
+        if (time_module_map) return time_module_map;
+        time_module_map = ObjMap::create();
+        const char* names[] = {"now_utc","now_local","format","parse","sleep_ms","epoch_ms"};
+        for (const char* n : names) time_module_map->data[g_strings.intern(n)] = val_string(n);
+        return time_module_map;
+    }
+
+    ObjMap* ensure_log_module() {
+        if (log_module_map) return log_module_map;
+        log_module_map = ObjMap::create();
+        const char* names[] = {"set_level","set_output","set_json","log","debug","info","warn","error","flush"};
+        for (const char* n : names) log_module_map->data[g_strings.intern(n)] = val_string(n);
+        return log_module_map;
+    }
+
+    ObjMap* ensure_config_module() {
+        if (config_module_map) return config_module_map;
+        config_module_map = ObjMap::create();
+        const char* names[] = {"load_env","get","set","get_int","get_float","get_bool","has"};
+        for (const char* n : names) config_module_map->data[g_strings.intern(n)] = val_string(n);
+        return config_module_map;
+    }
+
+    ObjMap* ensure_input_module() {
+        if (input_module_map) return input_module_map;
+        input_module_map = ObjMap::create();
+        const char* names[] = {"enable_raw","disable_raw","key_available","poll","read_key"};
+        for (const char* n : names) input_module_map->data[g_strings.intern(n)] = val_string(n);
+        return input_module_map;
+    }
+
+    Value call_http_builtin(const std::string& method_name,
+                            const std::vector<Value>& args) {
+        if (method_name == "get") return http_bindings::builtin_http_get(args);
+        if (method_name == "post") return http_bindings::builtin_http_post(args);
+        if (method_name == "put") return http_bindings::builtin_http_put(args);
+        if (method_name == "patch") return http_bindings::builtin_http_patch(args);
+        if (method_name == "delete") return http_bindings::builtin_http_delete(args);
+        if (method_name == "head") return http_bindings::builtin_http_head(args);
+        if (method_name == "request") return http_bindings::builtin_http_request(args);
+        if (method_name == "set_timeout")
+            return http_bindings::builtin_http_set_timeout(args);
+        if (method_name == "set_verify_ssl")
+            return http_bindings::builtin_http_set_verify_ssl(args);
+        throw std::runtime_error("Unknown http method: " + method_name);
+    }
+
+    Value call_os_builtin(const std::string& method_name,
+                          const std::vector<Value>& args) {
+        if (method_name == "name") return os_bindings::builtin_os_name(args);
+        if (method_name == "sep") return os_bindings::builtin_os_sep(args);
+        if (method_name == "cwd") return os_bindings::builtin_os_cwd(args);
+        if (method_name == "chdir") return os_bindings::builtin_os_chdir(args);
+        if (method_name == "listdir") return os_bindings::builtin_os_listdir(args);
+        if (method_name == "exists") return os_bindings::builtin_os_exists(args);
+        if (method_name == "is_file") return os_bindings::builtin_os_is_file(args);
+        if (method_name == "is_dir") return os_bindings::builtin_os_is_dir(args);
+        if (method_name == "mkdir") return os_bindings::builtin_os_mkdir(args);
+        if (method_name == "remove") return os_bindings::builtin_os_remove(args);
+        if (method_name == "rmdir") return os_bindings::builtin_os_rmdir(args);
+        if (method_name == "rename") return os_bindings::builtin_os_rename(args);
+        if (method_name == "abspath") return os_bindings::builtin_os_abspath(args);
+        if (method_name == "getenv") return os_bindings::builtin_os_getenv(args);
+        if (method_name == "setenv") return os_bindings::builtin_os_setenv(args);
+        if (method_name == "unsetenv") return os_bindings::builtin_os_unsetenv(args);
+        throw std::runtime_error("Unknown os method: " + method_name);
+    }
+
+    Value call_fs_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "exists") return fs_bindings::builtin_fs_exists(args);
+        if (method_name == "is_file") return fs_bindings::builtin_fs_is_file(args);
+        if (method_name == "is_dir") return fs_bindings::builtin_fs_is_dir(args);
+        if (method_name == "mkdir") return fs_bindings::builtin_fs_mkdir(args);
+        if (method_name == "remove") return fs_bindings::builtin_fs_remove(args);
+        if (method_name == "rmdir") return fs_bindings::builtin_fs_rmdir(args);
+        if (method_name == "listdir") return fs_bindings::builtin_fs_listdir(args);
+        if (method_name == "read_text") return fs_bindings::builtin_fs_read_text(args);
+        if (method_name == "write_text") return fs_bindings::builtin_fs_write_text(args);
+        if (method_name == "append_text") return fs_bindings::builtin_fs_append_text(args);
+        if (method_name == "copy") return fs_bindings::builtin_fs_copy(args);
+        if (method_name == "move") return fs_bindings::builtin_fs_move(args);
+        if (method_name == "abspath") return fs_bindings::builtin_fs_abspath(args);
+        throw std::runtime_error("Unknown fs method: " + method_name);
+    }
+
+    Value call_path_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "join") return path_bindings::builtin_path_join(args);
+        if (method_name == "basename") return path_bindings::builtin_path_basename(args);
+        if (method_name == "dirname") return path_bindings::builtin_path_dirname(args);
+        if (method_name == "ext") return path_bindings::builtin_path_ext(args);
+        if (method_name == "stem") return path_bindings::builtin_path_stem(args);
+        if (method_name == "norm") return path_bindings::builtin_path_norm(args);
+        if (method_name == "abspath") return path_bindings::builtin_path_abspath(args);
+        if (method_name == "exists") return path_bindings::builtin_path_exists(args);
+        if (method_name == "is_file") return path_bindings::builtin_path_is_file(args);
+        if (method_name == "is_dir") return path_bindings::builtin_path_is_dir(args);
+        if (method_name == "read_text") return path_bindings::builtin_path_read_text(args);
+        if (method_name == "write_text") return path_bindings::builtin_path_write_text(args);
+        if (method_name == "listdir") return path_bindings::builtin_path_listdir(args);
+        if (method_name == "mkdir") return path_bindings::builtin_path_mkdir(args);
+        if (method_name == "remove") return path_bindings::builtin_path_remove(args);
+        if (method_name == "rmdir") return path_bindings::builtin_path_rmdir(args);
+        throw std::runtime_error("Unknown path method: " + method_name);
+    }
+
+    Value call_process_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "getpid") return process_bindings::builtin_process_getpid(args);
+        if (method_name == "run") return process_bindings::builtin_process_run(args);
+        if (method_name == "cwd") return process_bindings::builtin_process_cwd(args);
+        if (method_name == "chdir") return process_bindings::builtin_process_chdir(args);
+        if (method_name == "getenv") return process_bindings::builtin_process_getenv(args);
+        if (method_name == "setenv") return process_bindings::builtin_process_setenv(args);
+        if (method_name == "unsetenv") return process_bindings::builtin_process_unsetenv(args);
+        throw std::runtime_error("Unknown process method: " + method_name);
+    }
+
+    Value call_json_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "parse") return json_bindings::builtin_json_parse(args);
+        if (method_name == "stringify") return json_bindings::builtin_json_stringify(args);
+        throw std::runtime_error("Unknown json method: " + method_name);
+    }
+
+    Value call_url_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "parse") return url_bindings::builtin_url_parse(args);
+        if (method_name == "encode") return url_bindings::builtin_url_encode(args);
+        if (method_name == "decode") return url_bindings::builtin_url_decode(args);
+        throw std::runtime_error("Unknown url method: " + method_name);
+    }
+
+    Value call_net_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "tcp_connect") return net_bindings::builtin_net_tcp_connect(args);
+        if (method_name == "tcp_listen") return net_bindings::builtin_net_tcp_listen(args);
+        if (method_name == "tcp_accept") return net_bindings::builtin_net_tcp_accept(args);
+        if (method_name == "tcp_try_accept") return net_bindings::builtin_net_tcp_try_accept(args);
+        if (method_name == "set_nonblocking") return net_bindings::builtin_net_set_nonblocking(args);
+        if (method_name == "tcp_send") return net_bindings::builtin_net_tcp_send(args);
+        if (method_name == "tcp_try_send") return net_bindings::builtin_net_tcp_try_send(args);
+        if (method_name == "tcp_recv") return net_bindings::builtin_net_tcp_recv(args);
+        if (method_name == "tcp_try_recv") return net_bindings::builtin_net_tcp_try_recv(args);
+        if (method_name == "tcp_close") return net_bindings::builtin_net_tcp_close(args);
+        if (method_name == "udp_bind") return net_bindings::builtin_net_udp_bind(args);
+        if (method_name == "udp_sendto") return net_bindings::builtin_net_udp_sendto(args);
+        if (method_name == "udp_recvfrom") return net_bindings::builtin_net_udp_recvfrom(args);
+        if (method_name == "udp_close") return net_bindings::builtin_net_udp_close(args);
+        if (method_name == "dns_lookup") return net_bindings::builtin_net_dns_lookup(args);
+        throw std::runtime_error("Unknown net method: " + method_name);
+    }
+
+    Value call_thread_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "spawn") return thread_bindings::builtin_thread_spawn(args);
+        if (method_name == "join") return thread_bindings::builtin_thread_join(args);
+        if (method_name == "is_done") return thread_bindings::builtin_thread_is_done(args);
+        if (method_name == "sleep") return thread_bindings::builtin_thread_sleep(args);
+        throw std::runtime_error("Unknown thread method: " + method_name);
+    }
+
+    Value call_channel_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "create") return channel_bindings::builtin_channel_create(args);
+        if (method_name == "send") return channel_bindings::builtin_channel_send(args);
+        if (method_name == "recv") return channel_bindings::builtin_channel_recv(args);
+        if (method_name == "try_recv") return channel_bindings::builtin_channel_try_recv(args);
+        if (method_name == "close") return channel_bindings::builtin_channel_close(args);
+        throw std::runtime_error("Unknown channel method: " + method_name);
+    }
+
+    Value call_async_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "spawn") return async_bindings::builtin_async_spawn(args);
+        if (method_name == "sleep") return async_bindings::builtin_async_sleep(args);
+        if (method_name == "tcp_recv") return async_bindings::builtin_async_tcp_recv(args);
+        if (method_name == "tcp_send") return async_bindings::builtin_async_tcp_send(args);
+        if (method_name == "tick") return async_bindings::builtin_async_tick(args);
+        if (method_name == "done") return async_bindings::builtin_async_done(args);
+        if (method_name == "status") return async_bindings::builtin_async_status(args);
+        if (method_name == "result") return async_bindings::builtin_async_result(args);
+        if (method_name == "cancel") return async_bindings::builtin_async_cancel(args);
+        if (method_name == "pending") return async_bindings::builtin_async_pending(args);
+        if (method_name == "await") return async_bindings::builtin_async_await(args);
+        throw std::runtime_error("Unknown async method: " + method_name);
+    }
+
+    Value call_crypto_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "sha256") return crypto_bindings::builtin_crypto_sha256(args);
+        if (method_name == "sha512") return crypto_bindings::builtin_crypto_sha512(args);
+        if (method_name == "hmac_sha256") return crypto_bindings::builtin_crypto_hmac_sha256(args);
+        if (method_name == "random_bytes") return crypto_bindings::builtin_crypto_random_bytes(args);
+        if (method_name == "hex_encode") return crypto_bindings::builtin_crypto_hex_encode(args);
+        if (method_name == "hex_decode") return crypto_bindings::builtin_crypto_hex_decode(args);
+        if (method_name == "base64_encode") return crypto_bindings::builtin_crypto_base64_encode(args);
+        if (method_name == "base64_decode") return crypto_bindings::builtin_crypto_base64_decode(args);
+        throw std::runtime_error("Unknown crypto method: " + method_name);
+    }
+
+    Value call_time_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "now_utc") return time_bindings::builtin_time_now_utc(args);
+        if (method_name == "now_local") return time_bindings::builtin_time_now_local(args);
+        if (method_name == "format") return time_bindings::builtin_time_format(args);
+        if (method_name == "parse") return time_bindings::builtin_time_parse(args);
+        if (method_name == "sleep_ms") return time_bindings::builtin_time_sleep_ms(args);
+        if (method_name == "epoch_ms") return time_bindings::builtin_time_epoch_ms(args);
+        throw std::runtime_error("Unknown time method: " + method_name);
+    }
+
+    Value call_log_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "set_level") return log_bindings::builtin_log_set_level(args);
+        if (method_name == "set_output") return log_bindings::builtin_log_set_output(args);
+        if (method_name == "set_json") return log_bindings::builtin_log_set_json(args);
+        if (method_name == "log") return log_bindings::builtin_log_log(args);
+        if (method_name == "debug") return log_bindings::builtin_log_debug(args);
+        if (method_name == "info") return log_bindings::builtin_log_info(args);
+        if (method_name == "warn") return log_bindings::builtin_log_warn(args);
+        if (method_name == "error") return log_bindings::builtin_log_error(args);
+        if (method_name == "flush") return log_bindings::builtin_log_flush(args);
+        throw std::runtime_error("Unknown log method: " + method_name);
+    }
+
+    Value call_config_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "load_env") return config_bindings::builtin_config_load_env(args);
+        if (method_name == "get") return config_bindings::builtin_config_get(args);
+        if (method_name == "set") return config_bindings::builtin_config_set(args);
+        if (method_name == "get_int") return config_bindings::builtin_config_get_int(args);
+        if (method_name == "get_float") return config_bindings::builtin_config_get_float(args);
+        if (method_name == "get_bool") return config_bindings::builtin_config_get_bool(args);
+        if (method_name == "has") return config_bindings::builtin_config_has(args);
+        throw std::runtime_error("Unknown config method: " + method_name);
+    }
+
+    Value call_input_builtin(const std::string& method_name, const std::vector<Value>& args) {
+        if (method_name == "enable_raw") return input_bindings::builtin_input_enable_raw(args);
+        if (method_name == "disable_raw") return input_bindings::builtin_input_disable_raw(args);
+        if (method_name == "key_available") return input_bindings::builtin_input_key_available(args);
+        if (method_name == "poll") return input_bindings::builtin_input_poll(args);
+        if (method_name == "read_key") return input_bindings::builtin_input_read_key(args);
+        throw std::runtime_error("Unknown input method: " + method_name);
+    }
+
 private:
+    void runtime_error(const std::string& msg) {
+        std::cerr << "Runtime Error: " << msg << std::endl;
+        for (size_t i = frame_count; i > 0; --i) {
+            CallFrame* frame = frames.get() + (i - 1);
+            const char* fname = frame->name ? frame->name : "<anon>";
+            size_t ip_offset = 0;
+            if (frame->chunk && frame->ip) {
+                ip_offset = static_cast<size_t>(frame->ip - frame->chunk->code.data());
+            }
+            std::cerr << "  at " << fname << " (ip " << ip_offset << ")" << std::endl;
+        }
+        exit(1);
+    }
+
+    void runtime_errorf(const char* fmt, ...) {
+        char buffer[1024];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buffer, sizeof(buffer), fmt, args);
+        va_end(args);
+        runtime_error(buffer);
+    }
+
     uint64_t execute(Chunk* main_chunk) {
         uint8_t* ip = fp->ip;
         uint64_t* slots = fp->slots;
@@ -5892,9 +9657,10 @@ private:
             &&DO_BUILTIN_FLOOR, &&DO_BUILTIN_CEIL, &&DO_BUILTIN_ROUND,
             &&DO_BUILTIN_UPPER, &&DO_BUILTIN_LOWER, &&DO_BUILTIN_TRIM, &&DO_BUILTIN_REPLACE,
             &&DO_BUILTIN_SPLIT, &&DO_BUILTIN_JOIN, &&DO_BUILTIN_CONTAINS, &&DO_BUILTIN_FIND,
-            &&DO_BUILTIN_STARTSWITH, &&DO_BUILTIN_ENDSWITH,
+            &&DO_BUILTIN_STARTSWITH, &&DO_BUILTIN_ENDSWITH, &&DO_BUILTIN_KEYS,
             &&DO_BUILTIN_ENUMERATE, &&DO_BUILTIN_ZIP, &&DO_BUILTIN_PRINT, &&DO_BUILTIN_PRINTLN,
             &&DO_BUILTIN_STR, &&DO_BUILTIN_INT, &&DO_BUILTIN_FLOAT, &&DO_BUILTIN_TYPE,
+            &&DO_BUILTIN_ISINSTANCE, &&DO_BUILTIN_HASATTR, &&DO_BUILTIN_GETATTR, &&DO_BUILTIN_SETATTR,
             // Mathematical built-in functions
             &&DO_BUILTIN_SIN, &&DO_BUILTIN_COS, &&DO_BUILTIN_TAN, &&DO_BUILTIN_ATAN, &&DO_BUILTIN_EXP, &&DO_BUILTIN_LOG,
             // High-performance native built-ins
@@ -5915,6 +9681,8 @@ private:
             &&DO_TRY, &&DO_CATCH, &&DO_THROW,
             // Tuple support
             &&DO_BUILD_TUPLE, &&DO_UNPACK_TUPLE,
+            // Module import
+            &&DO_IMPORT,
             // ============================================================================
             // FUTURE-PROOF: HARDWARE & EMBEDDED SYSTEMS PRIMITIVES
             // ============================================================================
@@ -5968,12 +9736,21 @@ private:
                     ip = h.catch_ip;  // Use local ip!
                     DISPATCH();
                 }
-                std::cerr << "Error: Division by zero" << std::endl;
-                return VAL_NONE;
+                runtime_error("Division by zero");
             }
             sp[-2] = val_number(a / b); DROP();
         } DISPATCH();
-        DO_MOD: { sp[-2] = val_int(as_int(sp[-2]) % as_int(sp[-1])); DROP(); } DISPATCH();
+        DO_MOD: {
+            if (!is_int(sp[-2]) || !is_int(sp[-1])) {
+                runtime_error("Modulo requires integer operands");
+            }
+            int64_t denom = as_int(sp[-1]);
+            if (denom == 0) {
+                runtime_error("Modulo by zero");
+            }
+            sp[-2] = val_int(as_int(sp[-2]) % denom);
+            DROP();
+        } DISPATCH();
         DO_POW: {
             double a = is_int(sp[-2]) ? (double)as_int(sp[-2]) : as_number(sp[-2]);
             double b = is_int(sp[-1]) ? (double)as_int(sp[-1]) : as_number(sp[-1]);
@@ -6335,6 +10112,19 @@ private:
             // When calling a class, create an instance and call init()
             if (is_class(callee)) {
                 ObjClass* klass = as_class(callee);
+                {
+                    std::unordered_set<std::string> missing_abstract;
+                    klass->collect_missing_abstract_methods(missing_abstract);
+                    if (klass->is_abstract || !missing_abstract.empty()) {
+                        if (!missing_abstract.empty()) {
+                            fprintf(stderr,
+                                    "Error: Cannot instantiate abstract class '%s' (missing '%s')\n",
+                                    klass->name->chars, missing_abstract.begin()->c_str());
+                        } else {
+                        runtime_errorf("Cannot instantiate abstract class '%s'", klass->name->chars);
+                    }
+                    }
+                }
                 ObjInstance* inst = ObjInstance::create(klass);
                 
                 // Replace class with instance on stack
@@ -6347,9 +10137,7 @@ private:
                     
                     // Check arity
                     if (argc != init_func->arity) {
-                        fprintf(stderr, "Error: init() expects %d args, got %d\n", 
-                                init_func->arity, argc);
-                        exit(1);
+                        runtime_errorf("init() expects %d args, got %d", init_func->arity, argc);
                     }
                     
                     // Call init method
@@ -6358,13 +10146,13 @@ private:
                     frame_count++;
                     
                     if (frame_count >= FRAMES_MAX - 1) {
-                        fprintf(stderr, "Stack overflow!\n");
-                        exit(1);
+                        runtime_error("Stack overflow");
                     }
                     
                     fp->chunk = init_func->chunk;
                     fp->ip = init_func->chunk->code.data();
                     fp->slots = sp - argc - 1;  // Instance is at slots[0] ('self')
+                    fp->name = init_func->name ? init_func->name->chars : "init";
                     
                     ip = fp->ip;
                     slots = fp->slots;
@@ -6373,8 +10161,7 @@ private:
                 } else {
                     // No init method - just return the instance
                     if (argc != 0) {
-                        fprintf(stderr, "Error: Class has no init(), but %d args passed\n", argc);
-                        exit(1);
+                        runtime_errorf("Class has no init(), but %d args passed", argc);
                     }
                     sp -= argc;  // Pop arguments (if any)
                     // Instance is already on stack
@@ -6405,17 +10192,15 @@ private:
             call_fast_path:
             // Safety check: verify callee is an object
             if (!is_obj(callee)) {
-                fprintf(stderr, "Error: Attempt to call non-function (not an object, callee=0x%llx)\n", 
-                        (unsigned long long)callee);
-                exit(1);
+                runtime_errorf("Attempt to call non-function (not an object, callee=0x%llx)",
+                               (unsigned long long)callee);
             }
             
             ObjFunc* func = as_func(callee);
             
             // Safety check: verify func pointer and chunk
             if (!func || !func->chunk) {
-                fprintf(stderr, "Error: Invalid function object or missing chunk (func=%p)\n", (void*)func);
-                exit(1);
+                runtime_errorf("Invalid function object or missing chunk (func=%p)", (void*)func);
             }
             
             // Get function name for JIT lookup (use C-string to avoid destructor issues)
@@ -6487,13 +10272,13 @@ private:
             
             // Stack overflow check
             if (frame_count >= FRAMES_MAX - 1) {
-                fprintf(stderr, "Stack overflow! Max frames: %zu\n", FRAMES_MAX);
-                exit(1);
+                runtime_errorf("Stack overflow! Max frames: %zu", FRAMES_MAX);
             }
             
             fp->chunk = func->chunk;
             fp->ip = func->chunk->code.data();
             fp->slots = sp - argc - 1;
+            fp->name = func->name ? func->name->chars : "<anon>";
             
             ip = fp->ip;
             slots = fp->slots;
@@ -6528,19 +10313,58 @@ private:
         
         // ===== COLLECTIONS =====
         DO_GET_INDEX: {
-            int64_t idx = as_int(POP());
+            uint64_t v_idx = POP();
             uint64_t obj = PEEK(0);
             if (is_obj(obj) && obj_type(obj) == ObjType::LIST) {
-                sp[-1] = as_list(obj)->get(idx);
+                if (!is_int(v_idx)) {
+                    runtime_error("List index must be an integer");
+                }
+                int64_t idx = as_int(v_idx);
+                ObjList* list = as_list(obj);
+                if (idx < 0 || idx >= static_cast<int64_t>(list->count)) {
+                    runtime_error("List index out of range");
+                }
+                sp[-1] = list->get(static_cast<size_t>(idx));
+            } else if (is_obj(obj) && obj_type(obj) == ObjType::MAP) {
+              ObjMap *map = as_map(obj);
+              if (is_obj(v_idx) && obj_type(v_idx) == ObjType::STRING) {
+                ObjString *key = as_string(v_idx);
+                auto it = map->data.find(key);
+                if (it != map->data.end()) {
+                  sp[-1] = it->second;
+                } else {
+                  runtime_error(std::string("Key not found: ") + key->str());
+                }
+              } else {
+                runtime_error("Map index must be a string");
+              }
+            } else {
+                runtime_error("Invalid index operation");
             }
         } DISPATCH();
         
         DO_SET_INDEX: {
             uint64_t val = POP();
-            int64_t idx = as_int(POP());
+            uint64_t idx_val = POP();
             uint64_t obj = PEEK(0);
             if (is_obj(obj) && obj_type(obj) == ObjType::LIST) {
-                as_list(obj)->set(idx, val);
+                if (!is_int(idx_val)) {
+                    runtime_error("List index must be an integer");
+                }
+                int64_t idx = as_int(idx_val);
+                ObjList* list = as_list(obj);
+                if (idx < 0 || idx >= static_cast<int64_t>(list->count)) {
+                    runtime_error("List index out of range");
+                }
+                list->set(static_cast<size_t>(idx), val);
+            } else if (is_obj(obj) && obj_type(obj) == ObjType::MAP) {
+                if (!is_obj(idx_val) || obj_type(idx_val) != ObjType::STRING) {
+                    runtime_error("Map index must be a string");
+                }
+                ObjMap* map = as_map(obj);
+                map->data[as_string(idx_val)] = val;
+            } else {
+                runtime_error("Invalid index assignment");
             }
         } DISPATCH();
         
@@ -6780,13 +10604,40 @@ private:
                 sp[-1] = val_int(0);  // Default for non-objects
             }
         } DISPATCH();
+
+        DO_BUILTIN_KEYS: {
+            uint64_t v = POP();
+            if (!is_obj(v) || obj_type(v) != ObjType::MAP) {
+                runtime_error("keys() expects a map");
+            }
+            ObjMap* m = as_map(v);
+            ObjList* out = ObjList::create();
+            for (const auto& kv : m->data) {
+                out->push(val_string(kv.first));
+            }
+            PUSH(val_list(out));
+        } DISPATCH();
         
         DO_BUILTIN_RANGE: {
             uint8_t argc = READ_BYTE();
             int64_t start = 0, stop = 0, step = 1;
-            if (argc == 1) { stop = as_int(POP()); }
-            else if (argc == 2) { stop = as_int(POP()); start = as_int(POP()); }
-            else { step = as_int(POP()); stop = as_int(POP()); start = as_int(POP()); }
+            auto require_int = [&](uint64_t v, const char* name) -> int64_t {
+                if (!is_int(v)) runtime_errorf("range() %s must be an integer", name);
+                return as_int(v);
+            };
+            if (argc == 1) {
+                stop = require_int(POP(), "stop");
+            } else if (argc == 2) {
+                stop = require_int(POP(), "stop");
+                start = require_int(POP(), "start");
+            } else if (argc == 3) {
+                step = require_int(POP(), "step");
+                stop = require_int(POP(), "stop");
+                start = require_int(POP(), "start");
+            } else {
+                runtime_error("range() expects 1, 2, or 3 arguments");
+            }
+            if (step == 0) runtime_error("range() step cannot be zero");
             PUSH(val_obj((Obj*)ObjRange::create(start, stop, step)));
         } DISPATCH();
         
@@ -7159,24 +11010,40 @@ private:
         
         DO_BUILTIN_INT: {
             uint64_t v = POP();
-            if (is_int(v)) PUSH(v);
-            else if (is_number(v)) PUSH(val_int((int64_t)as_number(v)));
-            else if (is_obj(v) && obj_type(v) == ObjType::STRING) {
-                try { PUSH(val_int(std::stoll(as_string(v)->str()))); }
-                catch (...) { PUSH(val_int(0)); }
+            if (is_int(v)) {
+                PUSH(v);
+            } else if (is_number(v)) {
+                PUSH(val_int((int64_t)as_number(v)));
+            } else if (is_bool(v)) {
+                PUSH(val_int(v == VAL_TRUE ? 1 : 0));
+            } else if (is_obj(v) && obj_type(v) == ObjType::STRING) {
+                int64_t parsed = 0;
+                if (!parse_int64_strict(as_string(v)->str(), parsed)) {
+                    runtime_errorf("Cannot convert '%s' to integer", as_string(v)->chars);
+                }
+                PUSH(val_int(parsed));
+            } else {
+                runtime_error("Cannot convert to integer");
             }
-            else PUSH(val_int(0));
         } DISPATCH();
         
         DO_BUILTIN_FLOAT: {
             uint64_t v = POP();
-            if (is_number(v)) PUSH(v);
-            else if (is_int(v)) PUSH(val_number((double)as_int(v)));
-            else if (is_obj(v) && obj_type(v) == ObjType::STRING) {
-                try { PUSH(val_number(std::stod(as_string(v)->str()))); }
-                catch (...) { PUSH(val_number(0.0)); }
+            if (is_int(v)) {
+                PUSH(val_number((double)as_int(v)));
+            } else if (is_number(v)) {
+                PUSH(v);
+            } else if (is_bool(v)) {
+                PUSH(val_number(v == VAL_TRUE ? 1.0 : 0.0));
+            } else if (is_obj(v) && obj_type(v) == ObjType::STRING) {
+                double parsed = 0.0;
+                if (!parse_double_strict(as_string(v)->str(), parsed)) {
+                    runtime_errorf("Cannot convert '%s' to float", as_string(v)->chars);
+                }
+                PUSH(val_number(parsed));
+            } else {
+                runtime_error("Cannot convert to float");
             }
-            else PUSH(val_number(0.0));
         } DISPATCH();
         
         DO_BUILTIN_TYPE: {
@@ -7202,6 +11069,131 @@ private:
                 }
             }
             else PUSH(val_string("unknown"));
+        } DISPATCH();
+
+        DO_BUILTIN_ISINSTANCE: {
+            uint64_t class_val = POP();
+            uint64_t obj = POP();
+            bool result = false;
+            if (is_class(class_val) && is_instance(obj)) {
+                ObjClass* target = as_class(class_val);
+                ObjClass* current = as_instance(obj)->klass;
+                while (current) {
+                    if (current == target) {
+                        result = true;
+                        break;
+                    }
+                    current = current->parent;
+                }
+            }
+            PUSH(result ? VAL_TRUE : VAL_FALSE);
+        } DISPATCH();
+
+        DO_BUILTIN_HASATTR: {
+            uint64_t attr_name_val = POP();
+            uint64_t obj = POP();
+            bool result = false;
+
+            if (is_obj(attr_name_val) && obj_type(attr_name_val) == ObjType::STRING) {
+                std::string attr_name = as_string(attr_name_val)->str();
+
+                if (is_instance(obj)) {
+                    ObjInstance* inst = as_instance(obj);
+                    if (inst->fields.find(attr_name) != inst->fields.end()) {
+                        result = true;
+                    } else if (inst->klass->find_method(attr_name) != VAL_NONE) {
+                        result = true;
+                    }
+                } else if (is_class(obj)) {
+                    result = as_class(obj)->find_method(attr_name) != VAL_NONE;
+                } else if (is_map(obj)) {
+                    ObjMap* map = as_map(obj);
+                    ObjString* key = intern_name(attr_name);
+                    result = map->data.find(key) != map->data.end();
+                }
+            }
+
+            PUSH(result ? VAL_TRUE : VAL_FALSE);
+        } DISPATCH();
+
+        DO_BUILTIN_GETATTR: {
+            uint8_t argc = READ_BYTE();  // 2 or 3
+            uint64_t default_val = VAL_NONE;
+            if (argc == 3) {
+                default_val = POP();
+            }
+
+            uint64_t attr_name_val = POP();
+            uint64_t obj = POP();
+
+            bool found = false;
+            uint64_t result = VAL_NONE;
+
+            if (is_obj(attr_name_val) && obj_type(attr_name_val) == ObjType::STRING) {
+                std::string attr_name = as_string(attr_name_val)->str();
+
+                if (is_instance(obj)) {
+                    ObjInstance* inst = as_instance(obj);
+                    auto it = inst->fields.find(attr_name);
+                    if (it != inst->fields.end()) {
+                        found = true;
+                        result = it->second;
+                    } else {
+                        uint64_t method = inst->klass->find_method(attr_name);
+                        if (method != VAL_NONE) {
+                            found = true;
+                            result = method;
+                        }
+                    }
+                } else if (is_class(obj)) {
+                    uint64_t method = as_class(obj)->find_method(attr_name);
+                    if (method != VAL_NONE) {
+                        found = true;
+                        result = method;
+                    }
+                } else if (is_map(obj)) {
+                    ObjMap* map = as_map(obj);
+                    ObjString* key = intern_name(attr_name);
+                    auto it = map->data.find(key);
+                    if (it != map->data.end()) {
+                        found = true;
+                        result = it->second;
+                    }
+                }
+            }
+
+            if (found) {
+                PUSH(result);
+                DISPATCH();
+            }
+            if (argc == 3) {
+                PUSH(default_val);
+                DISPATCH();
+            }
+
+            runtime_error("getattr() attribute not found");
+        } DISPATCH();
+
+        DO_BUILTIN_SETATTR: {
+            uint64_t value = POP();
+            uint64_t attr_name_val = POP();
+            uint64_t obj = POP();
+
+            if (!is_obj(attr_name_val) || obj_type(attr_name_val) != ObjType::STRING) {
+                runtime_error("setattr() attribute name must be string");
+            }
+
+            std::string attr_name = as_string(attr_name_val)->str();
+            if (is_instance(obj)) {
+                as_instance(obj)->fields[attr_name] = value;
+            } else if (is_map(obj)) {
+                ObjMap* map = as_map(obj);
+                map->data[intern_name(attr_name)] = value;
+            } else {
+                runtime_error("setattr() target must be instance or map");
+            }
+
+            PUSH(value);
         } DISPATCH();
         
         // � MATH BUILTINS
@@ -7333,13 +11325,11 @@ private:
             else if (mode == "rb") f = fopen(filename.c_str(), "rb");
             else if (mode == "wb") f = fopen(filename.c_str(), "wb");
             else {
-                fprintf(stderr, "Error: Invalid file mode '%s'\n", mode.c_str());
-                exit(1);
+                runtime_errorf("Invalid file mode '%s'", mode.c_str());
             }
             
             if (!f) {
-                fprintf(stderr, "Error: Failed to open file '%s'\n", filename.c_str());
-                exit(1);
+                runtime_errorf("Failed to open file '%s'", filename.c_str());
             }
             
             // Store file pointer as integer (file handle ID)
@@ -7431,8 +11421,7 @@ private:
                 fclose(f);
                 PUSH(VAL_NONE);
             } else {
-                fprintf(stderr, "Error: Cannot open file for writing: %s\n", fn->chars);
-                exit(1);
+                runtime_errorf("Cannot open file for writing: %s", fn->chars);
             }
         } DISPATCH();
         
@@ -7442,8 +11431,7 @@ private:
             ObjString* fn = as_string(filename);
             FILE* f = fopen(fn->chars, "r");
             if (!f) {
-                fprintf(stderr, "Error: Cannot open file for reading: %s\n", fn->chars);
-                exit(1);
+                runtime_errorf("Cannot open file for reading: %s", fn->chars);
             }
             fseek(f, 0, SEEK_END);
             long size = ftell(f);
@@ -7493,9 +11481,8 @@ private:
                 // Look up method in class hierarchy
                 uint64_t method = klass->find_method(method_name);
                 if (method == VAL_NONE) {
-                    fprintf(stderr, "Error: Method '%s' not found in class '%s'\n", 
-                            method_name.c_str(), klass->name->chars);
-                    exit(1);
+                    runtime_errorf("Method '%s' not found in class '%s'",
+                                   method_name.c_str(), klass->name->chars);
                 }
                 
                 ObjFunc* func = as_func(method);
@@ -7506,18 +11493,187 @@ private:
                 frame_count++;
                 
                 if (frame_count >= FRAMES_MAX - 1) {
-                    fprintf(stderr, "Stack overflow in method call!\n");
-                    exit(1);
+                    runtime_error("Stack overflow in method call");
                 }
                 
                 fp->chunk = func->chunk;
                 fp->ip = func->chunk->code.data();
                 fp->slots = sp - argc - 1;  // 'self' is at slots[0]
+                fp->name = func->name ? func->name->chars : method_name.c_str();
                 
                 ip = fp->ip;
                 slots = fp->slots;
                 chunk = fp->chunk;
                 DISPATCH();
+            }
+
+            // Handle module map methods (e.g. http.get(...))
+            if (is_map(obj)) {
+                ObjMap* map = as_map(obj);
+                if (map == ensure_http_module()) {
+                    try {
+                        {
+                            std::vector<Value> args_vec;
+                            args_vec.reserve(argc);
+                            for (uint8_t i = 0; i < argc; ++i) {
+                                args_vec.push_back(to_value(sp[-argc + i]));
+                            }
+
+                            Value result = call_http_builtin(method_name, args_vec);
+                            sp -= argc + 1;
+                            PUSH(from_value(result));
+                        }
+                    } catch (const std::exception& e) {
+                        runtime_error(e.what());
+                    }
+                    DISPATCH();
+                }
+                if (map == ensure_os_module()) {
+                    try {
+                        {
+                            std::vector<Value> args_vec;
+                            args_vec.reserve(argc);
+                            for (uint8_t i = 0; i < argc; ++i) {
+                                args_vec.push_back(to_value(sp[-argc + i]));
+                            }
+
+                            Value result = call_os_builtin(method_name, args_vec);
+                            sp -= argc + 1;
+                            PUSH(from_value(result));
+                        }
+                    } catch (const std::exception& e) {
+                        runtime_error(e.what());
+                    }
+                    DISPATCH();
+                }
+                if (map == ensure_fs_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_fs_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_path_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_path_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_process_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_process_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_json_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_json_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_url_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_url_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_net_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_net_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_thread_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_thread_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_channel_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_channel_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_async_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_async_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_crypto_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_crypto_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_time_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_time_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_log_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_log_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_config_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_config_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+                if (map == ensure_input_module()) {
+                    try {
+                        std::vector<Value> args_vec; args_vec.reserve(argc);
+                        for (uint8_t i = 0; i < argc; ++i) args_vec.push_back(to_value(sp[-argc + i]));
+                        Value result = call_input_builtin(method_name, args_vec);
+                        sp -= argc + 1; PUSH(from_value(result));
+                    } catch (const std::exception& e) { runtime_error(e.what()); }
+                    DISPATCH();
+                }
+
+                runtime_errorf("Unknown method '%s' on map", method_name.c_str());
             }
             
             // Handle file methods
@@ -7569,8 +11725,7 @@ private:
                 sp -= argc + 1;
                 PUSH(VAL_NONE);
             } else {
-                fprintf(stderr, "Error: Unknown method '%s'\n", method_name.c_str());
-                exit(1);
+                runtime_errorf("Unknown method '%s'", method_name.c_str());
             }
         } DISPATCH();
         
@@ -7600,20 +11755,41 @@ private:
                     DISPATCH();
                 }
                 
-                fprintf(stderr, "Error: Instance has no property '%s'\n", prop_name.c_str());
-                exit(1);
+                runtime_errorf("Instance has no property '%s'", prop_name.c_str());
             }
-            
+
+            // Handle maps (for modules like http)
+            if (is_map(obj)) {
+              ObjMap *map = as_map(obj);
+              ObjString *key = intern_name(prop_name);
+
+              auto it = map->data.find(key);
+              if (it != map->data.end()) {
+                PUSH(it->second);
+                DISPATCH();
+              }
+
+              runtime_errorf("Map has no property '%s'", prop_name.c_str());
+            }
+
             // For other object types (future: maps, etc.)
             PUSH(VAL_NONE);
         } DISPATCH();
         
         DO_BUILD_MAP: {
             uint8_t n = READ_BYTE();  // Number of key-value pairs
-            // Build a map from stack values
-            // For now, store as object reference
-            sp -= n * 2;  // Pop all keys and values
-            PUSH(VAL_NONE);  // Push placeholder
+            ObjMap* map = ObjMap::create();
+
+            // Pop in reverse: ..., key1, value1, key2, value2, ...
+            for (int i = 0; i < n; ++i) {
+                uint64_t value = POP();
+                uint64_t key = POP();
+                if (!is_obj(key) || obj_type(key) != ObjType::STRING) {
+                    runtime_error("Map keys must be strings");
+                }
+                map->data[as_string(key)] = value;
+            }
+            PUSH(val_map(map));
         } DISPATCH();
         
         // ============================================================================
@@ -7639,8 +11815,7 @@ private:
                 
                 uint64_t parent_val = globals[parent_name];
                 if (!is_class(parent_val)) {
-                    fprintf(stderr, "Error: Parent '%s' is not a class\n", parent_name->chars);
-                    exit(1);
+                    runtime_errorf("Parent '%s' is not a class", parent_name->chars);
                 }
                 klass->parent = as_class(parent_val);
             }
@@ -7655,11 +11830,22 @@ private:
         DO_NEW_INSTANCE: {
             uint64_t class_val = POP();
             if (!is_class(class_val)) {
-                fprintf(stderr, "Error: Cannot instantiate non-class\n");
-                exit(1);
+                runtime_error("Cannot instantiate non-class");
             }
             
             ObjClass* klass = as_class(class_val);
+            {
+                std::unordered_set<std::string> missing_abstract;
+                klass->collect_missing_abstract_methods(missing_abstract);
+                if (klass->is_abstract || !missing_abstract.empty()) {
+                    if (!missing_abstract.empty()) {
+                        runtime_errorf("Cannot instantiate abstract class '%s' (missing '%s')",
+                                       klass->name->chars, missing_abstract.begin()->c_str());
+                    } else {
+                        runtime_errorf("Cannot instantiate abstract class '%s'", klass->name->chars);
+                    }
+                }
+            }
             ObjInstance* inst = ObjInstance::create(klass);
             PUSH(val_instance(inst));
         } DISPATCH();
@@ -7676,8 +11862,7 @@ private:
             uint64_t obj = PEEK(0);  // Keep instance on stack
             
             if (!is_instance(obj)) {
-                fprintf(stderr, "Error: Cannot set property on non-instance\n");
-                exit(1);
+                runtime_error("Cannot set property on non-instance");
             }
             
             ObjInstance* inst = as_instance(obj);
@@ -7709,16 +11894,14 @@ private:
             uint64_t receiver = sp[-1 - argc];
             
             if (!is_instance(receiver)) {
-                fprintf(stderr, "Error: Can only invoke methods on instances\n");
-                exit(1);
+                runtime_error("Can only invoke methods on instances");
             }
             
             ObjInstance* inst = as_instance(receiver);
             uint64_t method = inst->klass->find_method(method_name);
             
             if (method == VAL_NONE) {
-                fprintf(stderr, "Error: Undefined method '%s'\n", method_name.c_str());
-                exit(1);
+                runtime_errorf("Undefined method '%s'", method_name.c_str());
             }
             
             ObjFunc* func = as_func(method);
@@ -7750,22 +11933,19 @@ private:
             // Get 'self' (receiver)
             uint64_t self = slots[0];
             if (!is_instance(self)) {
-                fprintf(stderr, "Error: 'super' used outside of method\n");
-                exit(1);
+                runtime_error("'super' used outside of method");
             }
             
             ObjInstance* inst = as_instance(self);
             ObjClass* parent = inst->klass->parent;
             
             if (!parent) {
-                fprintf(stderr, "Error: Class has no parent\n");
-                exit(1);
+                runtime_error("Class has no parent");
             }
             
             uint64_t method = parent->find_method(method_name);
             if (method == VAL_NONE) {
-                fprintf(stderr, "Error: Parent has no method '%s'\n", method_name.c_str());
-                exit(1);
+                runtime_errorf("Parent has no method '%s'", method_name.c_str());
             }
             
             ObjFunc* func = as_func(method);
@@ -7779,6 +11959,7 @@ private:
             fp->ip = func->chunk->code.data();
             fp->slots = sp - argc;  // 'self' already in correct position
             fp->slots[0] = self;    // Ensure 'self' is current instance
+            fp->name = func->name ? func->name->chars : method_name.c_str();
             
             ip = fp->ip;
             slots = fp->slots;
@@ -8006,6 +12187,122 @@ private:
                 PUSH(list->items[i]);
             }
         } DISPATCH();
+
+        DO_IMPORT: {
+            uint16_t module_idx = READ_SHORT();
+            const Value& module_name_val = chunk->constants[module_idx];
+            if (module_name_val.type != ObjectType::STRING) {
+                runtime_error("Invalid module name in import");
+            }
+
+            const std::string& module_name = module_name_val.data.string;
+            ObjString* module_key = intern_name(module_name);
+
+            auto existing = globals.find(module_key);
+            if (existing != globals.end()) {
+                PUSH(existing->second);
+                DISPATCH();
+            }
+
+            if (module_name == "http") {
+                uint64_t module_val = val_map(ensure_http_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "os") {
+                uint64_t module_val = val_map(ensure_os_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "fs") {
+                uint64_t module_val = val_map(ensure_fs_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "path") {
+                uint64_t module_val = val_map(ensure_path_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "process") {
+                uint64_t module_val = val_map(ensure_process_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "json") {
+                uint64_t module_val = val_map(ensure_json_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "url") {
+                uint64_t module_val = val_map(ensure_url_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "net") {
+                uint64_t module_val = val_map(ensure_net_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "thread") {
+                uint64_t module_val = val_map(ensure_thread_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "channel") {
+                uint64_t module_val = val_map(ensure_channel_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "async") {
+                uint64_t module_val = val_map(ensure_async_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "crypto") {
+                uint64_t module_val = val_map(ensure_crypto_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "datetime") {
+                uint64_t module_val = val_map(ensure_time_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "log") {
+                uint64_t module_val = val_map(ensure_log_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "config") {
+                uint64_t module_val = val_map(ensure_config_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+            if (module_name == "input") {
+                uint64_t module_val = val_map(ensure_input_module());
+                globals[module_key] = module_val;
+                PUSH(module_val);
+                DISPATCH();
+            }
+
+            runtime_errorf("Module not found: %s", module_name.c_str());
+        } DISPATCH();
         
         // ============================================================================
         //  FUTURE-PROOF: HARDWARE & EMBEDDED SYSTEMS PRIMITIVES 
@@ -8016,8 +12313,7 @@ private:
             size_t size = static_cast<size_t>(as_int(size_val));
             void* ptr = std::malloc(size);
             if (!ptr) {
-                std::cerr << "Error: mem_alloc failed for " << size << " bytes" << std::endl;
-                return VAL_NONE;
+                runtime_errorf("mem_alloc failed for %zu bytes", size);
             }
             PUSH(val_int(static_cast<long>(reinterpret_cast<intptr_t>(ptr))));
         } DISPATCH();
@@ -8589,6 +12885,11 @@ private:
                 case OpCode::OP_JUMP:
                 case OpCode::OP_JUMP_IF_FALSE:
                 case OpCode::OP_LOOP:
+                case OpCode::OP_ITER_NEXT:
+                case OpCode::OP_GET_PROPERTY:
+                case OpCode::OP_SET_PROPERTY:
+                case OpCode::OP_IMPORT:
+                case OpCode::OP_TRY:
                     // 16-bit operand
                     if (i + 2 < original.size()) {
                         optimized.push_back(original[i + 1]);
@@ -8607,11 +12908,27 @@ private:
                 case OpCode::OP_BUILD_LIST:
                 case OpCode::OP_BUILD_TUPLE:
                 case OpCode::OP_UNPACK_TUPLE:
+                case OpCode::OP_BUILD_MAP:
                 case OpCode::OP_TENSOR_CREATE:
+                case OpCode::OP_BUILTIN_GETATTR:
                     // 8-bit operand
                     if (i + 1 < original.size()) {
                         optimized.push_back(original[i + 1]);
                         i += 2;
+                    } else {
+                        i++;
+                    }
+                    break;
+                
+                case OpCode::OP_METHOD_CALL:
+                case OpCode::OP_INVOKE_METHOD:
+                case OpCode::OP_SUPER_INVOKE:
+                    // Mixed operands: 8-bit + 16-bit or 16-bit + 8-bit
+                    if (i + 3 < original.size()) {
+                        optimized.push_back(original[i + 1]);
+                        optimized.push_back(original[i + 2]);
+                        optimized.push_back(original[i + 3]);
+                        i += 4;
                     } else {
                         i++;
                     }
@@ -8666,29 +12983,53 @@ class LPM {
 private:
     fs::path levython_home;
     fs::path packages_dir;
-    fs::path config_file;
+    fs::path cache_dir;
+    fs::path lock_file;
+    fs::path registry_config_file;
     
     struct PackageInfo {
         std::string version;
         std::string description;
+        std::vector<std::string> deps;
+    };
+
+    struct RemotePackageInfo {
+        std::string name;
+        std::string version;
+        std::string description;
+        std::vector<std::string> deps;
+        std::string path;
+        std::string sha256;
+    };
+
+    struct RegistryConfig {
+        std::string repo = "levython/lpm-registry";
+        std::string branch = "main";
+    };
+
+    enum class ConstraintType { ANY, EXACT, CARET };
+
+    struct VersionConstraint {
+        ConstraintType type = ConstraintType::ANY;
+        std::string raw;
     };
     
     std::map<std::string, PackageInfo> official_packages = {
-        {"math", {"1.0.0", "Advanced math functions (factorial, gcd, prime, fib)"}},
-        {"tensor", {"1.0.0", "Tensor/matrix operations for AI/ML"}},
-        {"ml", {"1.0.0", "Machine learning algorithms (sigmoid, relu, softmax)"}},
-        {"nn", {"1.0.0", "Neural network framework"}},
-        {"json", {"1.0.0", "JSON parsing and serialization"}},
-        {"http", {"1.0.0", "HTTP client/server"}},
-        {"csv", {"1.0.0", "CSV file handling"}},
-        {"sql", {"1.0.0", "SQL database interface"}},
-        {"crypto", {"1.0.0", "Cryptography utilities"}},
-        {"test", {"1.0.0", "Unit testing framework"}},
-        {"cli", {"1.0.0", "CLI argument parsing"}},
-        {"time", {"1.0.0", "Date and time utilities"}},
-        {"random", {"1.0.0", "Random number generation"}},
-        {"string", {"1.0.0", "Advanced string manipulation"}},
-        {"file", {"1.0.0", "Advanced file operations"}},
+        {"math", {"1.0.0", "Advanced math functions (factorial, gcd, prime, fib)", {}}},
+        {"tensor", {"1.0.0", "Tensor/matrix operations for AI/ML", {"math"}}},
+        {"ml", {"1.0.0", "Machine learning algorithms (sigmoid, relu, softmax)", {"math", "tensor"}}},
+        {"nn", {"1.0.0", "Neural network framework", {"ml", "tensor"}}},
+        {"json", {"1.0.0", "JSON parsing and serialization", {}}},
+        {"http", {"1.0.0", "HTTP client/server", {"json"}}},
+        {"csv", {"1.0.0", "CSV file handling", {}}},
+        {"sql", {"1.0.0", "SQL database interface", {}}},
+        {"crypto", {"1.0.0", "Cryptography utilities", {"math"}}},
+        {"test", {"1.0.0", "Unit testing framework", {}}},
+        {"cli", {"1.0.0", "CLI argument parsing", {}}},
+        {"time", {"1.0.0", "Date and time utilities", {}}},
+        {"random", {"1.0.0", "Random number generation", {"math"}}},
+        {"string", {"1.0.0", "Advanced string manipulation", {}}},
+        {"file", {"1.0.0", "Advanced file operations", {}}},
     };
     
     const std::string RESET = "\033[0m";
@@ -8703,6 +13044,26 @@ private:
     void print_error(const std::string& msg) { std::cout << RED << "✗ " << msg << RESET << std::endl; }
     void print_info(const std::string& msg) { std::cout << BLUE << "ℹ " << msg << RESET << std::endl; }
     void print_warning(const std::string& msg) { std::cout << YELLOW << "⚠ " << msg << RESET << std::endl; }
+
+    static std::string trim(const std::string& s) {
+        size_t a = 0;
+        while (a < s.size() && std::isspace(static_cast<unsigned char>(s[a]))) a++;
+        size_t b = s.size();
+        while (b > a && std::isspace(static_cast<unsigned char>(s[b - 1]))) b--;
+        return s.substr(a, b - a);
+    }
+
+    static std::pair<std::string, VersionConstraint> parse_package_spec(const std::string& spec) {
+        size_t at = spec.rfind('@');
+        if (at == std::string::npos || at == 0 || at + 1 >= spec.size()) {
+            return {spec, VersionConstraint{}};
+        }
+        VersionConstraint c;
+        c.raw = spec.substr(at + 1);
+        if (!c.raw.empty() && c.raw[0] == '^') c.type = ConstraintType::CARET;
+        else c.type = ConstraintType::EXACT;
+        return {spec.substr(0, at), c};
+    }
     
     void init_dirs() {
         const char* home = std::getenv("HOME");
@@ -8711,11 +13072,337 @@ private:
         if (!home) home = ".";
         levython_home = fs::path(home) / ".levython";
         packages_dir = levython_home / "packages";
+        cache_dir = levython_home / "cache";
+        lock_file = levython_home / "lpm.lock";
+        registry_config_file = levython_home / "lpm_registry.json";
         try {
             fs::create_directories(packages_dir);
+            fs::create_directories(cache_dir);
         } catch (...) {
             // Silently ignore directory creation errors
         }
+    }
+
+    RegistryConfig load_registry_config() const {
+        RegistryConfig cfg;
+        if (!fs::exists(registry_config_file)) return cfg;
+        std::string c = read_text(registry_config_file);
+        std::string repo = extract_json_string(c, "repo");
+        std::string branch = extract_json_string(c, "branch");
+        if (!repo.empty()) cfg.repo = repo;
+        if (!branch.empty()) cfg.branch = branch;
+        return cfg;
+    }
+
+    bool save_registry_config(const RegistryConfig& cfg) const {
+        std::ostringstream ss;
+        ss << "{\n"
+           << "  \"repo\": \"" << cfg.repo << "\",\n"
+           << "  \"branch\": \"" << cfg.branch << "\"\n"
+           << "}\n";
+        return write_text_atomic(registry_config_file, ss.str());
+    }
+
+    static std::string shell_escape(const std::string& s) {
+        std::string out = "'";
+        for (char c : s) {
+            if (c == '\'') out += "'\\''";
+            else out.push_back(c);
+        }
+        out += "'";
+        return out;
+    }
+
+    static std::string url_encode(const std::string& s) {
+        static const char* hex = "0123456789ABCDEF";
+        std::string out;
+        out.reserve(s.size() * 3);
+        for (unsigned char c : s) {
+            if (std::isalnum(c) || c == '-' || c == '_' || c == '.' || c == '~' || c == '/') {
+                out.push_back(static_cast<char>(c));
+            } else {
+                out.push_back('%');
+                out.push_back(hex[(c >> 4) & 0xF]);
+                out.push_back(hex[c & 0xF]);
+            }
+        }
+        return out;
+    }
+
+    std::string run_capture(const std::string& cmd) const {
+#ifdef _WIN32
+        FILE* pipe = _popen(cmd.c_str(), "r");
+#else
+        FILE* pipe = popen(cmd.c_str(), "r");
+#endif
+        if (!pipe) return "";
+        std::string out;
+        char buf[4096];
+        while (fgets(buf, sizeof(buf), pipe)) out += buf;
+#ifdef _WIN32
+        _pclose(pipe);
+#else
+        pclose(pipe);
+#endif
+        return out;
+    }
+
+    std::string http_get(const std::string& url,
+                         const std::vector<std::string>& headers = {}) const {
+        std::ostringstream cmd;
+        cmd << "curl -sL --connect-timeout 8 --max-time 30 ";
+        for (const auto& h : headers) {
+            cmd << "-H " << shell_escape(h) << " ";
+        }
+        cmd << shell_escape(url) << " 2>/dev/null";
+        return run_capture(cmd.str());
+    }
+
+    static std::string b64_encode(const std::string& in) {
+        static const char* chars =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::string out;
+        int val = 0, valb = -6;
+        for (unsigned char c : in) {
+            val = (val << 8) + c;
+            valb += 8;
+            while (valb >= 0) {
+                out.push_back(chars[(val >> valb) & 0x3F]);
+                valb -= 6;
+            }
+        }
+        if (valb > -6) out.push_back(chars[((val << 8) >> (valb + 8)) & 0x3F]);
+        while (out.size() % 4) out.push_back('=');
+        return out;
+    }
+
+    static std::string b64_decode(const std::string& in) {
+        static const std::string chars =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::vector<int> t(256, -1);
+        for (int i = 0; i < 64; i++) t[chars[i]] = i;
+        std::string out;
+        int val = 0, valb = -8;
+        for (unsigned char c : in) {
+            if (std::isspace(c)) continue;
+            if (t[c] == -1) break;
+            val = (val << 6) + t[c];
+            valb += 6;
+            if (valb >= 0) {
+                out.push_back(char((val >> valb) & 0xFF));
+                valb -= 8;
+            }
+        }
+        return out;
+    }
+
+    bool github_get_file(const RegistryConfig& cfg, const std::string& repo_path,
+                         std::string& out_content, std::string& out_sha) const {
+        std::string api = "https://api.github.com/repos/" + cfg.repo + "/contents/" +
+                          url_encode(repo_path) + "?ref=" + url_encode(cfg.branch);
+        std::string res = http_get(api, {"Accept: application/vnd.github+json"});
+        out_sha = extract_json_string(res, "sha");
+        std::string b64 = extract_json_string(res, "content");
+        if (out_sha.empty() || b64.empty()) {
+            out_content.clear();
+            return false;
+        }
+        b64.erase(std::remove(b64.begin(), b64.end(), '\n'), b64.end());
+        out_content = b64_decode(b64);
+        return true;
+    }
+
+    bool github_put_file(const RegistryConfig& cfg, const std::string& repo_path,
+                         const std::string& content, const std::string& message,
+                         const std::string& token, const std::string& sha = "") const {
+        std::string api = "https://api.github.com/repos/" + cfg.repo + "/contents/" +
+                          url_encode(repo_path);
+        std::ostringstream payload;
+        payload << "{"
+                << "\"message\":\"" << message << "\","
+                << "\"branch\":\"" << cfg.branch << "\","
+                << "\"content\":\"" << b64_encode(content) << "\"";
+        if (!sha.empty()) payload << ",\"sha\":\"" << sha << "\"";
+        payload << "}";
+
+        std::string cmd = "curl -sL -X PUT "
+                          "-H " + shell_escape("Accept: application/vnd.github+json") + " "
+                          "-H " + shell_escape("Authorization: Bearer " + token) + " "
+                          "-H " + shell_escape("Content-Type: application/json") + " "
+                          "-d " + shell_escape(payload.str()) + " " +
+                          shell_escape(api) + " 2>/dev/null";
+        std::string out = run_capture(cmd);
+        return out.find("\"content\"") != std::string::npos ||
+               out.find("\"commit\"") != std::string::npos;
+    }
+
+    std::vector<RemotePackageInfo> parse_remote_index(const std::string& tsv) const {
+        std::vector<RemotePackageInfo> out;
+        std::istringstream ss(tsv);
+        std::string line;
+        while (std::getline(ss, line)) {
+            line = trim(line);
+            if (line.empty() || line[0] == '#') continue;
+            std::vector<std::string> cols;
+            std::string cur;
+            for (char c : line) {
+                if (c == '\t') {
+                    cols.push_back(cur);
+                    cur.clear();
+                } else cur.push_back(c);
+            }
+            cols.push_back(cur);
+            if (cols.size() < 6) continue;
+            RemotePackageInfo p;
+            p.name = cols[0];
+            p.version = cols[1];
+            p.description = cols[2];
+            p.path = cols[4];
+            p.sha256 = cols[5];
+            if (!cols[3].empty()) {
+                std::stringstream ds(cols[3]);
+                std::string dep;
+                while (std::getline(ds, dep, ',')) {
+                    dep = trim(dep);
+                    if (!dep.empty()) p.deps.push_back(dep);
+                }
+            }
+            out.push_back(std::move(p));
+        }
+        return out;
+    }
+
+    std::vector<RemotePackageInfo> fetch_remote_index() const {
+        RegistryConfig cfg = load_registry_config();
+        std::string url = "https://raw.githubusercontent.com/" + cfg.repo + "/" + cfg.branch + "/index.tsv";
+        std::string tsv = http_get(url);
+        return parse_remote_index(tsv);
+    }
+
+    std::string join_csv(const std::vector<std::string>& items) const {
+        std::ostringstream ss;
+        for (size_t i = 0; i < items.size(); ++i) {
+            if (i) ss << ",";
+            ss << items[i];
+        }
+        return ss.str();
+    }
+
+    std::string make_index_line(const RemotePackageInfo& p) const {
+        std::ostringstream ss;
+        ss << p.name << "\t" << p.version << "\t" << p.description << "\t"
+           << join_csv(p.deps) << "\t" << p.path << "\t" << p.sha256;
+        return ss.str();
+    }
+
+    std::string read_text(const fs::path& p) const {
+        std::ifstream f(p);
+        if (!f) return "";
+        return std::string((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
+    }
+
+    bool write_text_atomic(const fs::path& p, const std::string& data) const {
+        try {
+            fs::create_directories(p.parent_path());
+            fs::path tmp = p;
+            tmp += ".tmp";
+            {
+                std::ofstream out(tmp, std::ios::trunc);
+                if (!out) return false;
+                out << data;
+            }
+            fs::rename(tmp, p);
+            return true;
+        } catch (...) {
+            return false;
+        }
+    }
+
+    std::string extract_json_string(const std::string& json, const std::string& key) const {
+        std::string needle = "\"" + key + "\"";
+        size_t p = json.find(needle);
+        if (p == std::string::npos) return "";
+        p = json.find(':', p + needle.size());
+        if (p == std::string::npos) return "";
+        p = json.find('"', p + 1);
+        if (p == std::string::npos) return "";
+        size_t e = json.find('"', p + 1);
+        if (e == std::string::npos) return "";
+        return json.substr(p + 1, e - p - 1);
+    }
+
+    std::vector<std::string> extract_json_array(const std::string& json, const std::string& key) const {
+        std::vector<std::string> out;
+        std::string needle = "\"" + key + "\"";
+        size_t p = json.find(needle);
+        if (p == std::string::npos) return out;
+        p = json.find('[', p + needle.size());
+        if (p == std::string::npos) return out;
+        size_t e = json.find(']', p + 1);
+        if (e == std::string::npos) return out;
+        std::string body = json.substr(p + 1, e - p - 1);
+        size_t i = 0;
+        while (i < body.size()) {
+            size_t q1 = body.find('"', i);
+            if (q1 == std::string::npos) break;
+            size_t q2 = body.find('"', q1 + 1);
+            if (q2 == std::string::npos) break;
+            out.push_back(body.substr(q1 + 1, q2 - q1 - 1));
+            i = q2 + 1;
+        }
+        return out;
+    }
+
+    std::map<std::string, std::string> parse_manifest_dependencies(const fs::path& manifest) const {
+        std::map<std::string, std::string> deps;
+        std::string content = read_text(manifest);
+        if (content.empty()) return deps;
+
+        size_t dep_key = content.find("\"dependencies\"");
+        if (dep_key == std::string::npos) return deps;
+        size_t obj_start = content.find('{', dep_key);
+        if (obj_start == std::string::npos) return deps;
+        size_t obj_end = content.find('}', obj_start + 1);
+        if (obj_end == std::string::npos) return deps;
+        std::string body = content.substr(obj_start + 1, obj_end - obj_start - 1);
+
+        size_t i = 0;
+        while (i < body.size()) {
+            size_t k1 = body.find('"', i);
+            if (k1 == std::string::npos) break;
+            size_t k2 = body.find('"', k1 + 1);
+            if (k2 == std::string::npos) break;
+            std::string key = body.substr(k1 + 1, k2 - k1 - 1);
+            size_t colon = body.find(':', k2 + 1);
+            if (colon == std::string::npos) break;
+            size_t v1 = body.find('"', colon + 1);
+            if (v1 == std::string::npos) break;
+            size_t v2 = body.find('"', v1 + 1);
+            if (v2 == std::string::npos) break;
+            std::string value = body.substr(v1 + 1, v2 - v1 - 1);
+            deps[key] = value;
+            i = v2 + 1;
+        }
+        return deps;
+    }
+
+    bool write_manifest_dependencies(const fs::path& manifest,
+                                     const std::map<std::string, std::string>& deps) const {
+        std::ostringstream ss;
+        ss << "{\n"
+           << "  \"name\": \"my-levython-project\",\n"
+           << "  \"version\": \"0.1.0\",\n"
+           << "  \"dependencies\": {\n";
+        bool first = true;
+        for (const auto& [name, ver] : deps) {
+            if (!first) ss << ",\n";
+            ss << "    \"" << name << "\": \"" << ver << "\"";
+            first = false;
+        }
+        ss << "\n"
+           << "  }\n"
+           << "}\n";
+        return write_text_atomic(manifest, ss.str());
     }
     
     std::string generate_package_code(const std::string& name) {
@@ -8767,13 +13454,30 @@ act pad_right(s, w, c) { if len(s) >= w { -> s } -> s + repeat(c, w - len(s)) }
         return "# LPM Package: " + name + "\nact init() { say(\"" + name + " loaded\") }\n";
     }
     
-    void write_package(const std::string& name, const std::string& ver) {
+    bool write_package(const std::string& name, const std::string& ver,
+                       const std::vector<std::string>& deps = {},
+                       const std::string& source_override = "") {
         fs::path pkg_dir = packages_dir / name;
-        fs::create_directories(pkg_dir);
-        std::string code = generate_package_code(name);
-        std::ofstream(pkg_dir / (name + ".levy")) << code;
-        std::ofstream(pkg_dir / (name + ".ly")) << code;
-        std::ofstream(pkg_dir / "lpm.json") << "{\"name\":\"" << name << "\",\"version\":\"" << ver << "\"}";
+        try {
+            fs::create_directories(pkg_dir);
+            std::string code = source_override.empty() ? generate_package_code(name) : source_override;
+            std::ofstream(pkg_dir / (name + ".levy")) << code;
+            std::ofstream(pkg_dir / (name + ".ly")) << code;
+            std::ostringstream meta;
+            meta << "{"
+                 << "\"name\":\"" << name << "\","
+                 << "\"version\":\"" << ver << "\","
+                 << "\"deps\":[";
+            for (size_t i = 0; i < deps.size(); ++i) {
+                if (i) meta << ",";
+                meta << "\"" << deps[i] << "\"";
+            }
+            meta << "]}";
+            std::ofstream(pkg_dir / "lpm.json") << meta.str();
+            return true;
+        } catch (...) {
+            return false;
+        }
     }
     
     std::map<std::string, std::string> get_installed() {
@@ -8783,17 +13487,195 @@ act pad_right(s, w, c) { if len(s) >= w { -> s } -> s + repeat(c, w - len(s)) }
             if (e.is_directory()) {
                 std::string name = e.path().filename().string();
                 fs::path mf = e.path() / "lpm.json";
-                std::string ver = "1.0.1";
+                std::string ver = "0.0.0";
                 if (fs::exists(mf)) {
-                    std::ifstream f(mf);
-                    std::string c((std::istreambuf_iterator<char>(f)), std::istreambuf_iterator<char>());
-                    size_t p = c.find("\"version\"");
-                    if (p != std::string::npos) { size_t s = c.find("\"", p + 9) + 1; size_t e = c.find("\"", s); ver = c.substr(s, e - s); }
+                    std::string c = read_text(mf);
+                    std::string parsed = extract_json_string(c, "version");
+                    if (!parsed.empty()) ver = parsed;
                 }
                 installed[name] = ver;
             }
         }
         return installed;
+    }
+
+    std::vector<std::string> get_installed_deps(const std::string& name) const {
+        fs::path mf = packages_dir / name / "lpm.json";
+        if (!fs::exists(mf)) return {};
+        return extract_json_array(read_text(mf), "deps");
+    }
+
+    int version_rank(const std::string& v) const {
+        int a = 0, b = 0, c = 0;
+        std::sscanf(v.c_str(), "%d.%d.%d", &a, &b, &c);
+        return a * 1000000 + b * 1000 + c;
+    }
+
+    int version_major(const std::string& v) const {
+        int a = 0, b = 0, c = 0;
+        std::sscanf(v.c_str(), "%d.%d.%d", &a, &b, &c);
+        return a;
+    }
+
+    bool matches_constraint(const std::string& version, const VersionConstraint& c) const {
+        if (c.type == ConstraintType::ANY || c.raw.empty()) return true;
+        if (c.type == ConstraintType::EXACT) return version == c.raw;
+        std::string base = c.raw[0] == '^' ? c.raw.substr(1) : c.raw;
+        if (base.empty()) return true;
+        if (version_major(version) != version_major(base)) return false;
+        return version_rank(version) >= version_rank(base);
+    }
+
+    bool save_lockfile() {
+        auto inst = get_installed();
+        std::ostringstream ss;
+        ss << "{\n  \"lock_version\": 1,\n  \"packages\": {\n";
+        bool first = true;
+        for (const auto& [name, version] : inst) {
+            if (!first) ss << ",\n";
+            ss << "    \"" << name << "\": {\"version\": \"" << version << "\"}";
+            first = false;
+        }
+        ss << "\n  }\n}\n";
+        return write_text_atomic(lock_file, ss.str());
+    }
+
+    int install_one(const std::string& name, const VersionConstraint& c, bool is_direct, std::set<std::string>& visiting) {
+        if (visiting.count(name)) {
+            print_error("Dependency cycle detected at: " + name);
+            return 1;
+        }
+
+        auto it = official_packages.find(name);
+        if (it == official_packages.end()) {
+            return install_remote_recursive(name, c, is_direct, visiting);
+        }
+
+        if (!matches_constraint(it->second.version, c)) {
+            print_error("Version constraint not satisfiable for " + name + ": " + c.raw +
+                        " (available: " + it->second.version + ")");
+            return 1;
+        }
+
+        visiting.insert(name);
+        int rc = 0;
+        for (const auto& dep : it->second.deps) {
+            if (install_one(dep, VersionConstraint{}, false, visiting) != 0) rc = 1;
+        }
+        visiting.erase(name);
+        if (rc != 0) return rc;
+
+        auto installed = get_installed();
+        auto inst_it = installed.find(name);
+        if (inst_it != installed.end()) {
+            if (version_rank(inst_it->second) >= version_rank(it->second.version)) {
+                if (is_direct) print_warning("Already installed: " + name + "@" + inst_it->second);
+                return 0;
+            }
+            print_info("Upgrading " + name + ": " + inst_it->second + " -> " + it->second.version);
+        } else {
+            if (!it->second.deps.empty() && is_direct) {
+                std::ostringstream ds;
+                for (size_t i = 0; i < it->second.deps.size(); ++i) {
+                    if (i) ds << ", ";
+                    ds << it->second.deps[i];
+                }
+                print_info("Resolving dependencies for " + name + ": " + ds.str());
+            }
+        }
+
+        if (!write_package(name, it->second.version, it->second.deps)) {
+            print_error("Failed to write package: " + name);
+            return 1;
+        }
+
+        if (is_direct) {
+            print_success("Installed " + name + "@" + it->second.version);
+            std::cout << BLUE << "ℹ " << RESET << "Import: " << BOLD << "import " << name << RESET << std::endl;
+        } else {
+            print_success("Installed dependency " + name + "@" + it->second.version);
+        }
+        return 0;
+    }
+
+    std::vector<std::string> find_dependents(const std::string& name) {
+        std::vector<std::string> dependents;
+        auto inst = get_installed();
+        for (const auto& [pkg, _] : inst) {
+            if (pkg == name) continue;
+            std::vector<std::string> deps;
+            auto oit = official_packages.find(pkg);
+            if (oit != official_packages.end()) deps = oit->second.deps;
+            if (deps.empty()) deps = get_installed_deps(pkg);
+            if (std::find(deps.begin(), deps.end(), name) != deps.end()) {
+                dependents.push_back(pkg);
+            }
+        }
+        std::sort(dependents.begin(), dependents.end());
+        return dependents;
+    }
+
+    bool find_best_remote_package(const std::string& name, const VersionConstraint& c, RemotePackageInfo& out_pkg) {
+        auto all = fetch_remote_index();
+        bool found = false;
+        int best_rank = -1;
+        for (const auto& p : all) {
+            if (p.name != name) continue;
+            if (!matches_constraint(p.version, c)) continue;
+            int rank = version_rank(p.version);
+            if (!found || rank > best_rank) {
+                out_pkg = p;
+                best_rank = rank;
+                found = true;
+            }
+        }
+        return found;
+    }
+
+    int install_remote_recursive(const std::string& name, const VersionConstraint& c, bool is_direct, std::set<std::string>& visiting) {
+        if (visiting.count(name)) {
+            print_error("Dependency cycle detected at: " + name);
+            return 1;
+        }
+
+        RemotePackageInfo pkg;
+        if (!find_best_remote_package(name, c, pkg)) {
+            print_error("Package not found: " + name);
+            return 1;
+        }
+
+        visiting.insert(name);
+        for (const auto& dep : pkg.deps) {
+            if (install_one(dep, VersionConstraint{}, false, visiting) != 0) {
+                visiting.erase(name);
+                return 1;
+            }
+        }
+        visiting.erase(name);
+
+        auto installed = get_installed();
+        auto it = installed.find(name);
+        if (it != installed.end() && version_rank(it->second) >= version_rank(pkg.version)) {
+            if (is_direct) print_warning("Already installed: " + name + "@" + it->second);
+            return 0;
+        }
+
+        RegistryConfig cfg = load_registry_config();
+        std::string url = "https://raw.githubusercontent.com/" + cfg.repo + "/" + cfg.branch + "/" + pkg.path;
+        std::string code = http_get(url);
+        if (code.empty()) {
+            print_error("Failed to download package source from registry: " + name);
+            return 1;
+        }
+
+        if (!write_package(name, pkg.version, pkg.deps, code)) {
+            print_error("Failed to install downloaded package: " + name);
+            return 1;
+        }
+
+        if (is_direct) print_success("Installed " + name + "@" + pkg.version + " from GitHub registry");
+        else print_success("Installed dependency " + name + "@" + pkg.version + " from registry");
+        return 0;
     }
     
 public:
@@ -8801,8 +13683,9 @@ public:
     
     void print_header() {
         std::cout << CYAN << "\n╔══════════════════════════════════════════════════════════════════════╗\n"
-                  << "║     📦 LPM - Levython Package Manager v1.0.1                        ║\n"
-                  << "║        Native C++ • Fast • No Dependencies                           ║\n"
+                  << "║     📦 LPM - Levython Package Manager v2.0.0                        ║\n"
+                  << "║      Dependency Graph • Lockfile • Project Manifest                 ║\n"
+                  << "║      Be better than yesterday                                       ║\n"
                   << "╚══════════════════════════════════════════════════════════════════════╝\n" << RESET << std::endl;
     }
     
@@ -8810,36 +13693,258 @@ public:
         print_header();
         std::cout << "Usage: levython lpm <command> [args]\n\n"
                   << "Commands:\n"
-                  << "  install <pkg>   Install a package (use 'all' for all packages)\n"
-                  << "  remove <pkg>    Remove a package\n"
-                  << "  update          Update all installed packages\n"
+                  << "  registry show   Show GitHub registry configuration\n"
+                  << "  registry set <owner/repo> [branch] Configure registry repo\n"
+                  << "  publish [dir]   Publish package from lpm_pkg.json to GitHub\n"
+                  << "  init            Create project lpm.json manifest\n"
+                  << "  install [pkg]   Install package(s) with dependencies (pkg, pkg@1.2.3, pkg@^1.2.0)\n"
+                  << "  add <pkg...>    Install and add package(s) to project manifest (supports version spec)\n"
+                  << "  sync            Install all dependencies from project lpm.json\n"
+                  << "  remove <pkg>    Remove package (blocks if dependents exist)\n"
+                  << "  remove --force <pkg> Remove package even if dependents exist\n"
+                  << "  update          Update installed packages to latest known versions\n"
+                  << "  outdated        Show installed packages with newer versions\n"
+                  << "  lock            Regenerate lockfile (~/.levython/lpm.lock)\n"
+                  << "  doctor          Check package store health\n"
+                  << "  clean           Clean LPM cache\n"
                   << "  list            List installed packages\n"
                   << "  search [query]  Search available packages\n"
                   << "  info <pkg>      Show package details\n\n"
                   << "Aliases:\n"
-                  << "  ls = list, find = search, show = info, upgrade = update\n\n"
+                  << "  ls=list, find=search, show=info, upgrade=update\n\n"
                   << "Available packages:\n"
                   << "  math, tensor, ml, nn, random, test, string, json, http, csv,\n"
                   << "  sql, crypto, cli, time, file\n" << std::endl;
     }
-    
-    int install(const std::string& name) {
-        print_info("Installing: " + name);
-        auto it = official_packages.find(name);
-        if (it == official_packages.end()) { print_error("Package not found: " + name); return 1; }
-        auto inst = get_installed();
-        if (inst.find(name) != inst.end()) { print_warning("Already installed: " + name); return 0; }
-        write_package(name, it->second.version);
-        print_success("Installed " + name + "@" + it->second.version);
-        std::cout << BLUE << "ℹ " << RESET << "Import: " << BOLD << "import " << name << RESET << std::endl;
+
+    int registry_show() {
+        RegistryConfig cfg = load_registry_config();
+        std::cout << "Registry repo: " << cfg.repo << "\n";
+        std::cout << "Registry branch: " << cfg.branch << "\n";
+        std::cout << "Raw index URL: https://raw.githubusercontent.com/" << cfg.repo
+                  << "/" << cfg.branch << "/index.tsv\n";
+        return 0;
+    }
+
+    int registry_set(const std::string& repo, const std::string& branch = "main") {
+        RegistryConfig cfg;
+        cfg.repo = repo;
+        cfg.branch = branch;
+        if (!save_registry_config(cfg)) {
+            print_error("Failed to save registry configuration");
+            return 1;
+        }
+        print_success("Registry set to " + repo + "@" + branch);
+        return 0;
+    }
+
+    int publish(const fs::path& dir = fs::current_path()) {
+        const char* token_c = std::getenv("GITHUB_TOKEN");
+        if (!token_c || std::string(token_c).empty()) {
+            print_error("GITHUB_TOKEN is not set");
+            print_info("Set token and retry: export GITHUB_TOKEN=...");
+            return 1;
+        }
+        std::string token = token_c;
+
+        fs::path manifest = dir / "lpm_pkg.json";
+        if (!fs::exists(manifest)) {
+            print_error("Missing package manifest: " + manifest.string());
+            print_info("Expected fields: name, version, description, entry, deps[]");
+            return 1;
+        }
+
+        std::string m = read_text(manifest);
+        std::string name = extract_json_string(m, "name");
+        std::string version = extract_json_string(m, "version");
+        std::string description = extract_json_string(m, "description");
+        std::string entry = extract_json_string(m, "entry");
+        std::vector<std::string> deps = extract_json_array(m, "deps");
+
+        if (name.empty() || version.empty()) {
+            print_error("lpm_pkg.json requires name and version");
+            return 1;
+        }
+        if (entry.empty()) entry = name + ".levy";
+        if (description.empty()) description = "No description";
+
+        fs::path source = dir / entry;
+        if (!fs::exists(source)) {
+            print_error("Package source not found: " + source.string());
+            return 1;
+        }
+        std::string code = read_text(source);
+        if (code.empty()) {
+            print_error("Package source is empty: " + source.string());
+            return 1;
+        }
+
+        RegistryConfig cfg = load_registry_config();
+        std::string package_path = "packages/" + name + "/" + version + "/" + name + ".levy";
+
+        std::string existing_pkg_content, existing_pkg_sha;
+        github_get_file(cfg, package_path, existing_pkg_content, existing_pkg_sha);
+        if (!github_put_file(cfg, package_path, code,
+                             "lpm: publish " + name + "@" + version,
+                             token, existing_pkg_sha)) {
+            print_error("Failed to upload package source to GitHub");
+            return 1;
+        }
+
+        std::string index_content, index_sha;
+        bool has_index = github_get_file(cfg, "index.tsv", index_content, index_sha);
+        if (!has_index) index_content = "# name\\tversion\\tdescription\\tdeps\\tpath\\tsha256\n";
+
+        std::vector<RemotePackageInfo> entries = parse_remote_index(index_content);
+        std::vector<RemotePackageInfo> kept;
+        kept.reserve(entries.size() + 1);
+        for (const auto& e : entries) {
+            if (e.name == name && e.version == version) continue;
+            kept.push_back(e);
+        }
+
+        RemotePackageInfo now;
+        now.name = name;
+        now.version = version;
+        now.description = description;
+        now.deps = deps;
+        now.path = package_path;
+        now.sha256 = "";
+        kept.push_back(now);
+
+        std::sort(kept.begin(), kept.end(), [&](const RemotePackageInfo& a, const RemotePackageInfo& b) {
+            if (a.name != b.name) return a.name < b.name;
+            return version_rank(a.version) > version_rank(b.version);
+        });
+
+        std::ostringstream new_index;
+        new_index << "# name\tversion\tdescription\tdeps\tpath\tsha256\n";
+        for (const auto& e : kept) new_index << make_index_line(e) << "\n";
+
+        if (!github_put_file(cfg, "index.tsv", new_index.str(),
+                             "lpm: update index for " + name + "@" + version,
+                             token, index_sha)) {
+            print_error("Package uploaded but failed to update index.tsv");
+            return 1;
+        }
+
+        print_success("Published " + name + "@" + version + " to " + cfg.repo);
         return 0;
     }
     
-    int remove(const std::string& name) {
+    int init_manifest() {
+        fs::path manifest = fs::current_path() / "lpm.json";
+        if (fs::exists(manifest)) {
+            print_warning("Manifest already exists: " + manifest.string());
+            return 0;
+        }
+        std::map<std::string, std::string> empty;
+        if (!write_manifest_dependencies(manifest, empty)) {
+            print_error("Failed to write manifest: " + manifest.string());
+            return 1;
+        }
+        print_success("Created " + manifest.string());
+        return 0;
+    }
+
+    int install(const std::string& spec) {
+        auto parsed = parse_package_spec(spec);
+        const std::string& name = parsed.first;
+        const VersionConstraint& c = parsed.second;
+        if (name.empty()) {
+            print_error("Invalid package spec: " + spec);
+            return 1;
+        }
+        std::set<std::string> visiting;
+        int rc = install_one(name, c, true, visiting);
+        if (rc == 0) save_lockfile();
+        return rc;
+    }
+
+    int sync_manifest() {
+        fs::path manifest = fs::current_path() / "lpm.json";
+        if (!fs::exists(manifest)) {
+            print_error("No project manifest found: " + manifest.string());
+            print_info("Run: levython lpm init");
+            return 1;
+        }
+
+        auto deps = parse_manifest_dependencies(manifest);
+        if (deps.empty()) {
+            print_info("No dependencies declared in lpm.json");
+            return 0;
+        }
+
+        int failures = 0;
+        for (const auto& [name, ver] : deps) {
+            std::string spec = name;
+            if (!ver.empty()) spec += "@" + ver;
+            if (install(spec) != 0) failures++;
+        }
+        if (failures == 0) {
+            print_success("Manifest sync complete");
+            return 0;
+        }
+        print_error("Manifest sync completed with " + std::to_string(failures) + " failure(s)");
+        return 1;
+    }
+
+    int add_to_manifest(const std::vector<std::string>& pkgs) {
+        fs::path manifest = fs::current_path() / "lpm.json";
+        if (!fs::exists(manifest)) {
+            if (init_manifest() != 0) return 1;
+        }
+        auto deps = parse_manifest_dependencies(manifest);
+        int failures = 0;
+        for (const auto& spec : pkgs) {
+            auto parsed = parse_package_spec(spec);
+            const std::string& name = parsed.first;
+            if (name.empty()) {
+                print_error("Invalid package spec: " + spec);
+                failures++;
+                continue;
+            }
+            if (install(spec) != 0) {
+                failures++;
+                continue;
+            }
+
+            auto inst = get_installed();
+            auto it = inst.find(name);
+            if (it == inst.end()) {
+                print_error("Install succeeded but package missing locally: " + name);
+                failures++;
+                continue;
+            }
+            deps[name] = "^" + it->second;
+            print_success("Added to manifest: " + name + "@" + deps[name]);
+        }
+        if (!write_manifest_dependencies(manifest, deps)) {
+            print_error("Failed to update manifest");
+            return 1;
+        }
+        return failures == 0 ? 0 : 1;
+    }
+
+    int remove(const std::string& name, bool force_remove = false) {
         fs::path pkg = packages_dir / name;
         if (!fs::exists(pkg)) { print_error("Not installed: " + name); return 1; }
+
+        auto dependents = find_dependents(name);
+        if (!force_remove && !dependents.empty()) {
+            std::ostringstream ss;
+            for (size_t i = 0; i < dependents.size(); ++i) {
+                if (i) ss << ", ";
+                ss << dependents[i];
+            }
+            print_error("Cannot remove " + name + "; required by: " + ss.str());
+            print_info("Use --force to override");
+            return 1;
+        }
+
         fs::remove_all(pkg);
         print_success("Removed: " + name);
+        save_lockfile();
         return 0;
     }
     
@@ -8847,7 +13952,19 @@ public:
         auto inst = get_installed();
         if (inst.empty()) { print_info("No packages installed"); return 0; }
         std::cout << BOLD << "\n📦 Installed:\n" << RESET;
-        for (const auto& [n, v] : inst) std::cout << "  " << n << " @ " << v << std::endl;
+        for (const auto& [n, v] : inst) {
+            std::cout << "  " << n << " @ " << v;
+            auto oit = official_packages.find(n);
+            if (oit != official_packages.end() && !oit->second.deps.empty()) {
+                std::cout << "  (deps: ";
+                for (size_t i = 0; i < oit->second.deps.size(); ++i) {
+                    if (i) std::cout << ", ";
+                    std::cout << oit->second.deps[i];
+                }
+                std::cout << ")";
+            }
+            std::cout << "\n";
+        }
         std::cout << "\nTotal: " << inst.size() << " | Location: " << packages_dir.string() << std::endl;
         return 0;
     }
@@ -8858,20 +13975,73 @@ public:
         for (const auto& [n, i] : official_packages) {
             if (!q.empty() && n.find(q) == std::string::npos && i.description.find(q) == std::string::npos) continue;
             std::string st = inst.count(n) ? GREEN + " ✓" + RESET : "";
-            std::cout << "  " << n << st << " - " << i.description << std::endl;
+            std::cout << "  " << n << st << " - " << i.description << " [core]" << std::endl;
+        }
+        auto remotes = fetch_remote_index();
+        for (const auto& p : remotes) {
+            if (!q.empty() && p.name.find(q) == std::string::npos && p.description.find(q) == std::string::npos) continue;
+            std::string st = inst.count(p.name) ? GREEN + " ✓" + RESET : "";
+            std::cout << "  " << p.name << "@" << p.version << st << " - " << p.description << " [github]" << std::endl;
         }
         return 0;
     }
     
     int info(const std::string& name) {
         auto it = official_packages.find(name);
+        if (it == official_packages.end()) {
+            RemotePackageInfo remote;
+            if (!find_best_remote_package(name, VersionConstraint{}, remote)) {
+                print_error("Package not found: " + name);
+                return 1;
+            }
+            std::cout << BOLD << "\n📦 " << remote.name << RESET << std::endl;
+            std::cout << "  Version: " << remote.version << std::endl;
+            std::cout << "  " << remote.description << " [github]" << std::endl;
+            std::cout << "  Dependencies: ";
+            if (remote.deps.empty()) std::cout << "none\n";
+            else {
+                for (size_t i = 0; i < remote.deps.size(); ++i) {
+                    if (i) std::cout << ", ";
+                    std::cout << remote.deps[i];
+                }
+                std::cout << "\n";
+            }
+            auto inst = get_installed();
+            std::cout << "  Status: " << (inst.count(name) ? GREEN + "Installed" + RESET : "Not installed") << std::endl;
+            return 0;
+        }
         std::cout << BOLD << "\n📦 " << name << RESET << std::endl;
-        if (it != official_packages.end()) std::cout << "  " << it->second.description << std::endl;
+        std::cout << "  Version: " << it->second.version << std::endl;
+        std::cout << "  " << it->second.description << std::endl;
+        std::cout << "  Dependencies: ";
+        if (it->second.deps.empty()) {
+            std::cout << "none\n";
+        } else {
+            for (size_t i = 0; i < it->second.deps.size(); ++i) {
+                if (i) std::cout << ", ";
+                std::cout << it->second.deps[i];
+            }
+            std::cout << "\n";
+        }
         auto inst = get_installed();
         std::cout << "  Status: " << (inst.count(name) ? GREEN + "Installed" + RESET : "Not installed") << std::endl;
         return 0;
     }
     
+    int outdated() {
+        auto inst = get_installed();
+        int count = 0;
+        for (const auto& [name, ver] : inst) {
+            auto it = official_packages.find(name);
+            if (it != official_packages.end() && version_rank(it->second.version) > version_rank(ver)) {
+                std::cout << "  " << name << " " << ver << " -> " << it->second.version << std::endl;
+                count++;
+            }
+        }
+        if (count == 0) print_success("No outdated packages");
+        return 0;
+    }
+
     int update_packages() {
         print_info("Checking for package updates...");
         auto inst = get_installed();
@@ -8882,12 +14052,16 @@ public:
         int updated = 0;
         for (const auto& [name, ver] : inst) {
             auto it = official_packages.find(name);
-            if (it != official_packages.end() && it->second.version != ver) {
+            if (it != official_packages.end() && version_rank(it->second.version) > version_rank(ver)) {
                 print_info("Updating " + name + ": " + ver + " -> " + it->second.version);
-                write_package(name, it->second.version);
-                updated++;
+                if (write_package(name, it->second.version, it->second.deps)) {
+                    updated++;
+                } else {
+                    print_error("Failed to update: " + name);
+                }
             }
         }
+        save_lockfile();
         if (updated == 0) {
             print_success("All packages are up to date");
         } else {
@@ -8898,27 +14072,124 @@ public:
     
     int install_all() {
         print_info("Installing all available packages...");
+        int failures = 0;
         for (const auto& [name, info] : official_packages) {
-            install(name);
+            if (install(name) != 0) failures++;
         }
+        return failures == 0 ? 0 : 1;
+    }
+
+    int lock() {
+        if (!save_lockfile()) {
+            print_error("Failed to write lockfile: " + lock_file.string());
+            return 1;
+        }
+        print_success("Lockfile written: " + lock_file.string());
         return 0;
+    }
+
+    int doctor() {
+        int issues = 0;
+        if (!fs::exists(levython_home)) {
+            print_error("Missing home dir: " + levython_home.string());
+            issues++;
+        }
+        if (!fs::exists(packages_dir)) {
+            print_error("Missing packages dir: " + packages_dir.string());
+            issues++;
+        }
+        auto inst = get_installed();
+        for (const auto& [name, _] : inst) {
+            fs::path p = packages_dir / name;
+            if (!fs::exists(p / (name + ".levy"))) {
+                print_warning("Package missing .levy source: " + name);
+                issues++;
+            }
+            if (!fs::exists(p / "lpm.json")) {
+                print_warning("Package missing metadata: " + name);
+                issues++;
+            }
+        }
+        if (issues == 0) print_success("LPM doctor: healthy");
+        else print_warning("LPM doctor: found " + std::to_string(issues) + " issue(s)");
+        return issues == 0 ? 0 : 1;
+    }
+
+    int clean() {
+        try {
+            if (fs::exists(cache_dir)) fs::remove_all(cache_dir);
+            fs::create_directories(cache_dir);
+            print_success("Cache cleaned: " + cache_dir.string());
+            return 0;
+        } catch (...) {
+            print_error("Failed to clean cache");
+            return 1;
+        }
     }
     
     int run(int argc, char* argv[]) {
         if (argc < 3) { print_help(); return 0; }
         std::string cmd = argv[2];
         if (cmd == "help" || cmd == "-h" || cmd == "--help") { print_help(); return 0; }
+        if (cmd == "registry") {
+            if (argc < 4 || std::string(argv[3]) == "show") return registry_show();
+            if (std::string(argv[3]) == "set") {
+                if (argc < 5) {
+                    print_error("Usage: levython lpm registry set <owner/repo> [branch]");
+                    return 1;
+                }
+                std::string repo = argv[4];
+                std::string branch = (argc >= 6) ? argv[5] : "main";
+                return registry_set(repo, branch);
+            }
+            print_error("Usage: levython lpm registry [show|set]");
+            return 1;
+        }
+        if (cmd == "publish") {
+            fs::path dir = (argc >= 4) ? fs::path(argv[3]) : fs::current_path();
+            return publish(dir);
+        }
+        if (cmd == "init") return init_manifest();
+        if (cmd == "sync") return sync_manifest();
+        if (cmd == "clean") return clean();
+        if (cmd == "doctor") return doctor();
+        if (cmd == "lock") return lock();
+        if (cmd == "outdated") return outdated();
+        if (cmd == "add") {
+            if (argc < 4) { print_error("Usage: levython lpm add <package...>"); return 1; }
+            std::vector<std::string> pkgs;
+            for (int i = 3; i < argc; i++) pkgs.push_back(argv[i]);
+            return add_to_manifest(pkgs);
+        }
         if (cmd == "install") {
+            if (argc == 3) return sync_manifest();
             if (argc >= 4) {
-                std::string pkg = argv[3];
-                if (pkg == "all" || pkg == "--all") return install_all();
-                for (int i = 3; i < argc; i++) install(argv[i]);
-                return 0;
+                std::string pkg0 = argv[3];
+                if (pkg0 == "all" || pkg0 == "--all") return install_all();
+                int failures = 0;
+                for (int i = 3; i < argc; i++) {
+                    if (install(argv[i]) != 0) failures++;
+                }
+                return failures == 0 ? 0 : 1;
             }
             print_error("Usage: levython lpm install <package>");
             return 1;
         }
-        if ((cmd == "remove" || cmd == "uninstall") && argc >= 4) { for (int i = 3; i < argc; i++) remove(argv[i]); return 0; }
+        if (cmd == "remove" || cmd == "uninstall") {
+            if (argc < 4) { print_error("Usage: levython lpm remove [--force] <package...>"); return 1; }
+            bool force = false;
+            int start = 3;
+            if (std::string(argv[3]) == "--force" || std::string(argv[3]) == "-f") {
+                force = true;
+                start = 4;
+            }
+            if (start >= argc) { print_error("Usage: levython lpm remove [--force] <package...>"); return 1; }
+            int failures = 0;
+            for (int i = start; i < argc; i++) {
+                if (remove(argv[i], force) != 0) failures++;
+            }
+            return failures == 0 ? 0 : 1;
+        }
         if (cmd == "list" || cmd == "ls") return list();
         if (cmd == "search" || cmd == "find") return search(argc >= 4 ? argv[3] : "");
         if (cmd == "info" || cmd == "show") { if (argc >= 4) return info(argv[3]); return search(""); }
@@ -8936,7 +14207,7 @@ public:
 
 class UpdateManager {
 private:
-    const std::string CURRENT_VERSION = "1.0.1";
+    const std::string CURRENT_VERSION = "1.0.2";
     const std::string GITHUB_REPO = "levython/Levython";
     const std::string UPDATE_CHECK_URL = "https://api.github.com/repos/levython/Levython/releases/latest";
     
@@ -9130,6 +14401,7 @@ public:
     void print_help() {
         std::cout << "\n";
         std::cout << CYAN << "Levython Update Manager" << RESET << "\n\n";
+        std::cout << "Motto: Be better than yesterday\n\n";
         std::cout << "Usage: levython update [command]\n\n";
         std::cout << "Commands:\n";
         std::cout << "  check     Check for available updates\n";
@@ -9172,9 +14444,344 @@ public:
     }
 };
 
+// ============================================================================
+//  NATIVE APP PACKAGER - Build self-contained executables
+// ============================================================================
+
+namespace packager {
+static const std::string EMBED_MAGIC = "LEVY_APP_PAYLOAD_V1";
+
+bool read_file_bytes(const fs::path& path, std::vector<char>& out) {
+    std::ifstream in(path, std::ios::binary);
+    if (!in) return false;
+    in.seekg(0, std::ios::end);
+    std::streamoff size = in.tellg();
+    if (size < 0) return false;
+    in.seekg(0, std::ios::beg);
+    out.resize(static_cast<size_t>(size));
+    if (size > 0) in.read(out.data(), size);
+    return true;
+}
+
+bool write_file_bytes(const fs::path& path, const std::vector<char>& data) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) return false;
+    if (!data.empty()) out.write(data.data(), static_cast<std::streamsize>(data.size()));
+    return out.good();
+}
+
+bool append_embedded_payload(const fs::path& exe_path, const std::string& source_code) {
+    std::ofstream out(exe_path, std::ios::binary | std::ios::app);
+    if (!out) return false;
+
+    const uint64_t payload_size = static_cast<uint64_t>(source_code.size());
+    out.write(source_code.data(), static_cast<std::streamsize>(source_code.size()));
+    out.write(EMBED_MAGIC.data(), static_cast<std::streamsize>(EMBED_MAGIC.size()));
+    for (int i = 0; i < 8; ++i) {
+        char b = static_cast<char>((payload_size >> (i * 8)) & 0xFF);
+        out.write(&b, 1);
+    }
+    return out.good();
+}
+
+bool extract_embedded_payload(const fs::path& exe_path, std::string& source_code) {
+    std::ifstream in(exe_path, std::ios::binary);
+    if (!in) return false;
+    in.seekg(0, std::ios::end);
+    std::streamoff size = in.tellg();
+    const std::streamoff trailer = static_cast<std::streamoff>(EMBED_MAGIC.size() + 8);
+    if (size < trailer) return false;
+
+    in.seekg(size - trailer, std::ios::beg);
+    std::vector<char> tail(static_cast<size_t>(trailer));
+    in.read(tail.data(), trailer);
+    if (!in) return false;
+
+    std::string magic(tail.data(), EMBED_MAGIC.size());
+    if (magic != EMBED_MAGIC) return false;
+
+    uint64_t payload_size = 0;
+    for (int i = 0; i < 8; ++i) {
+        payload_size |= (static_cast<uint64_t>(static_cast<unsigned char>(tail[EMBED_MAGIC.size() + i])) << (i * 8));
+    }
+
+    const std::streamoff payload_start = size - trailer - static_cast<std::streamoff>(payload_size);
+    if (payload_size == 0 || payload_start < 0) return false;
+
+    in.seekg(payload_start, std::ios::beg);
+    std::string payload(payload_size, '\0');
+    in.read(&payload[0], static_cast<std::streamsize>(payload_size));
+    if (!in) return false;
+
+    source_code = std::move(payload);
+    return true;
+}
+
+bool set_executable_permissions(const fs::path& path) {
+#ifdef _WIN32
+    (void)path;
+    return true;
+#else
+    try {
+        fs::permissions(
+            path,
+            fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec,
+            fs::perm_options::add
+        );
+        return true;
+    } catch (...) {
+        return false;
+    }
+#endif
+}
+}  // namespace packager
+
+int execute_levython_source(const std::string& code) {
+    Lexer lexer(code);
+    auto tokens = lexer.tokenize();
+    Parser parser(tokens);
+    auto ast = parser.parse();
+    std::function<bool(ASTNode*)> imports_local_module = [&](ASTNode* node) -> bool {
+        if (!node) return false;
+        if (node->type == NodeType::IMPORT) {
+            const std::string& module_name = node->value;
+            fs::path p1 = module_name + ".levy";
+            fs::path p2 = module_name + ".ly";
+            if (fs::exists(p1) || fs::exists(p2)) return true;
+        }
+        for (const auto& child : node->children) {
+            if (imports_local_module(child.get())) return true;
+        }
+        return false;
+    };
+
+    if (imports_local_module(ast.get())) {
+        Interpreter().interpret(ast.get());
+        return 0;
+    }
+
+    Compiler compiler;
+    auto chunk = compiler.compile(ast.get());
+    FastVM vm;
+    vm.run(chunk.get());
+    return 0;
+}
+
+namespace {
+struct BuildOptions {
+    std::string input_source;
+    std::string output_exe;
+    std::string target = "native";       // native | windows | linux | macos | target triple
+    std::string runtime_path;            // optional prebuilt runtime path
+    std::string source_root = ".";       // used for cross-compile runtime build
+    bool verbose = false;
+};
+
+std::string shell_quote(const std::string& s) {
+    std::string out = "'";
+    for (char c : s) {
+        if (c == '\'') out += "'\\''";
+        else out.push_back(c);
+    }
+    out += "'";
+    return out;
+}
+
+bool command_exists(const std::string& cmd) {
+#ifdef _WIN32
+    std::string probe = "where " + cmd + " >nul 2>nul";
+#else
+    std::string probe = "command -v " + cmd + " >/dev/null 2>/dev/null";
+#endif
+    return std::system(probe.c_str()) == 0;
+}
+
+std::string normalize_target(const std::string& t) {
+    std::string x = t;
+    std::transform(x.begin(), x.end(), x.begin(), [](unsigned char c){ return static_cast<char>(std::tolower(c)); });
+    if (x == "native" || x.empty()) return "native";
+    if (x == "win" || x == "windows" || x == "exe") return "x86_64-windows-gnu";
+    if (x == "linux") return "x86_64-linux-gnu";
+    if (x == "mac" || x == "macos" || x == "darwin") {
+#if defined(__aarch64__) || defined(_M_ARM64)
+        return "aarch64-macos";
+#else
+        return "x86_64-macos";
+#endif
+    }
+    return x;  // assume explicit target triple
+}
+
+bool is_windows_target(const std::string& normalized_target) {
+    return normalized_target.find("windows") != std::string::npos;
+}
+
+int build_runtime_for_target(const std::string& self_exe_path,
+                             const BuildOptions& opts,
+                             fs::path& out_runtime_path) {
+    if (!opts.runtime_path.empty()) {
+        out_runtime_path = opts.runtime_path;
+        if (!fs::exists(out_runtime_path)) {
+            std::cerr << "Build error: Provided runtime not found: " << out_runtime_path.string() << std::endl;
+            return 1;
+        }
+        return 0;
+    }
+
+    std::string nt = normalize_target(opts.target);
+    if (nt == "native") {
+        out_runtime_path = self_exe_path;
+        return 0;
+    }
+
+    if (!command_exists("zig")) {
+        std::cerr << "Build error: cross-target requires Zig compiler (`zig`) in PATH." << std::endl;
+        std::cerr << "Install Zig, or provide a prebuilt runtime via --runtime <path>." << std::endl;
+        return 1;
+    }
+
+    fs::path src_root = fs::absolute(opts.source_root);
+    fs::path levython_cpp = src_root / "src" / "levython.cpp";
+    fs::path http_client_cpp = src_root / "src" / "http_client.cpp";
+    if (!fs::exists(levython_cpp) || !fs::exists(http_client_cpp)) {
+        std::cerr << "Build error: source files not found under --source-root: " << src_root.string() << std::endl;
+        std::cerr << "Expected: src/levython.cpp and src/http_client.cpp" << std::endl;
+        return 1;
+    }
+
+    fs::path runtime_out = fs::temp_directory_path() / ("levython_runtime_" + std::to_string(std::time(nullptr)));
+    if (is_windows_target(nt)) runtime_out += ".exe";
+
+    std::ostringstream cmd;
+    cmd << "zig c++ -std=c++17 -O3 "
+        << shell_quote(levython_cpp.string()) << " "
+        << shell_quote(http_client_cpp.string()) << " "
+        << "-o " << shell_quote(runtime_out.string()) << " "
+        << "-target " << shell_quote(nt) << " ";
+
+    if (nt.find("macos") != std::string::npos) {
+        cmd << "-framework Security -framework CoreFoundation ";
+    } else {
+        cmd << "-lssl -lcrypto ";
+    }
+
+    if (opts.verbose) {
+        std::cout << "[build] " << cmd.str() << std::endl;
+    }
+
+    int rc = std::system(cmd.str().c_str());
+    if (rc != 0 || !fs::exists(runtime_out)) {
+        std::cerr << "Build error: cross-runtime compile failed for target " << nt << std::endl;
+        std::cerr << "Tips: ensure Zig target toolchain + target OpenSSL libs are available, "
+                     "or use --runtime with a prebuilt runtime binary." << std::endl;
+        return 1;
+    }
+
+    out_runtime_path = runtime_out;
+    return 0;
+}
+}  // namespace
+
+int build_native_executable(const std::string& self_exe_path,
+                            const BuildOptions& opts) {
+    const std::string& input_source = opts.input_source;
+    const std::string& output_exe = opts.output_exe;
+
+    std::ifstream src_in(input_source);
+    if (!src_in) {
+        std::cerr << "Build error: Cannot open source file: " << input_source << std::endl;
+        return 1;
+    }
+    std::string source_code((std::istreambuf_iterator<char>(src_in)), std::istreambuf_iterator<char>());
+    if (source_code.empty()) {
+        std::cerr << "Build error: Source file is empty: " << input_source << std::endl;
+        return 1;
+    }
+
+    fs::path runtime_path;
+    int runtime_rc = build_runtime_for_target(self_exe_path, opts, runtime_path);
+    if (runtime_rc != 0) return runtime_rc;
+
+    std::vector<char> runtime_bytes;
+    if (!packager::read_file_bytes(runtime_path, runtime_bytes)) {
+        std::cerr << "Build error: Cannot read runtime executable: " << runtime_path.string() << std::endl;
+        return 1;
+    }
+    if (!packager::write_file_bytes(output_exe, runtime_bytes)) {
+        std::cerr << "Build error: Cannot write output executable: " << output_exe << std::endl;
+        return 1;
+    }
+    if (!packager::append_embedded_payload(output_exe, source_code)) {
+        std::cerr << "Build error: Cannot embed payload into executable: " << output_exe << std::endl;
+        return 1;
+    }
+    packager::set_executable_permissions(output_exe);
+
+    std::cout << "Built standalone executable: " << output_exe << std::endl;
+    std::cout << "Runtime embedded from: " << runtime_path.string() << std::endl;
+    std::cout << "Target: " << normalize_target(opts.target) << std::endl;
+    return 0;
+}
+
 
 // Main function to run the interpreter
 int main(int argc, char* argv[]) {
+    // Build command:
+    // levython build <input.levy|.ly> [-o output] [--target native|windows|linux|macos|triple]
+    //                                  [--runtime /path/to/runtime] [--source-root /path/to/repo]
+    if (argc >= 2 && std::string(argv[1]) == "build") {
+        if (argc == 2 || (argc >= 3 && (std::string(argv[2]) == "--help" || std::string(argv[2]) == "-h"))) {
+            std::cout << "Usage: levython build <input.levy|.ly> [options]\n\n"
+                      << "Options:\n"
+                      << "  -o, --output <file>      Output executable path\n"
+                      << "  --target <t>             native|windows|linux|macos|<target-triple>\n"
+                      << "  --runtime <file>         Use prebuilt runtime binary instead of compiling\n"
+                      << "  --source-root <dir>      Source root for cross-runtime compile (default: .)\n"
+                      << "  --verbose                Print cross-compile command\n\n"
+                      << "Examples:\n"
+                      << "  levython build app.levy -o app\n"
+                      << "  levython build app.levy --target windows -o app.exe\n"
+                      << "  levython build app.levy --target aarch64-macos -o app-mac\n";
+            return 0;
+        }
+        if (argc < 3) {
+            std::cerr << "Build error: missing input source file.\n";
+            std::cerr << "Run: levython build --help\n";
+            return 1;
+        }
+        BuildOptions opts;
+        opts.input_source = argv[2];
+        std::string normalized_target = "native";
+
+        for (int i = 3; i < argc; ++i) {
+            std::string arg = argv[i];
+            if ((arg == "-o" || arg == "--output") && i + 1 < argc) {
+                opts.output_exe = argv[++i];
+            } else if (arg == "--target" && i + 1 < argc) {
+                opts.target = argv[++i];
+            } else if (arg == "--runtime" && i + 1 < argc) {
+                opts.runtime_path = argv[++i];
+            } else if (arg == "--source-root" && i + 1 < argc) {
+                opts.source_root = argv[++i];
+            } else if (arg == "--verbose") {
+                opts.verbose = true;
+            } else {
+                std::cerr << "Unknown build argument: " << arg << std::endl;
+                return 1;
+            }
+        }
+
+        normalized_target = normalize_target(opts.target);
+
+        if (opts.output_exe.empty()) {
+            fs::path in_path(opts.input_source);
+            fs::path out_path = in_path.stem();
+            if (is_windows_target(normalized_target)) out_path += ".exe";
+            opts.output_exe = out_path.string();
+        }
+        return build_native_executable(argv[0], opts);
+    }
+
     // Check for LPM mode
     if (argc >= 2 && std::string(argv[1]) == "lpm") {
         return LPM().run(argc, argv);
@@ -9196,6 +14803,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--help" || arg == "-h") {
             std::cout << "╔══════════════════════════════════════════════════════════════════════╗\n";
             std::cout << "║           LEVYTHON - High Performance Programming                   ║\n";
+            std::cout << "║              Be better than yesterday                               ║\n";
             std::cout << "╠══════════════════════════════════════════════════════════════════════╣\n";
             std::cout << "║  Usage: levython [options] <file.levy|.ly>                           ║\n";
             std::cout << "║                                                                      ║\n";
@@ -9208,8 +14816,7 @@ int main(int argc, char* argv[]) {
             std::cout << "║    levython lpm <cmd>     Package manager                            ║\n";
             std::cout << "║    levython update        Check for updates                          ║\n";
             std::cout << "║    levython update install Install latest version                    ║\n";
-            std::cout << "║                                                                      ║\n";
-            std::cout << "║  Performance: fib(35) ~45ms, fib(40) ~480ms (faster than C)         ║\n";
+            std::cout << "║    levython build <src>   Build standalone executable                ║\n";
             std::cout << "╚══════════════════════════════════════════════════════════════════════╝\n";
             return 0;
         }
@@ -9217,10 +14824,18 @@ int main(int argc, char* argv[]) {
     }
     
     if (show_version) {
-        std::cout << "Levython 1.0.1 - High Performance Programming\n";
+        std::cout << "Levython 1.0.2 - Just a programming language\n";
+        std::cout << "~ Be better than yesterday\n";
         std::cout << "Engine: FastVM with NaN-boxing + x86-64 JIT\n";
-        std::cout << "Performance: fib(35) ~45ms, fib(40) ~480ms\n";
         return 0;
+    }
+
+    // If this executable has an embedded app payload, run it when no source file is provided.
+    if (file.empty()) {
+        std::string embedded_source;
+        if (packager::extract_embedded_payload(argv[0], embedded_source)) {
+            return execute_levython_source(embedded_source);
+        }
     }
     
     // Check for updates silently (once per day)
@@ -9238,17 +14853,5 @@ int main(int argc, char* argv[]) {
     if (!ifs) { std::cerr << "Cannot open: " << file << std::endl; return 1; }
     std::string code((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
     
-    // High-performance bytecode compilation + NaN-boxed VM
-    Lexer lexer(code);
-    auto tokens = lexer.tokenize();
-    Parser parser(tokens);
-    auto ast = parser.parse();
-    Compiler compiler;
-    auto chunk = compiler.compile(ast.get());
-    
-    // Run with FastVM that uses NaN-boxing and optimized instruction dispatch
-    FastVM vm;
-    vm.run(chunk.get());
-    
-    return 0;
+    return execute_levython_source(code);
 }

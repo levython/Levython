@@ -1,0 +1,195 @@
+# ============================================================================
+# LEVYTHON NATIVE MODULES EXAMPLE
+# ============================================================================
+# This example demonstrates all native modules available in Levython.
+# Run with: ./levython examples/native_modules.levy
+# ============================================================================
+
+import fs
+import path
+import process
+import json
+import url
+import net
+import thread
+import channel
+
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON NATIVE MODULES EXAMPLE                            ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")
+
+# -----------------------------------------------------------------------------
+# File System (fs) + Path Module
+# -----------------------------------------------------------------------------
+say("")
+say("📁 [Module 1] fs + path - File System Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+demo_dir <- "native_modules_demo"
+
+# Create directory
+if fs.exists(demo_dir) { 
+    if fs.exists(path.join(demo_dir, "demo.txt")) { 
+        fs.remove(path.join(demo_dir, "demo.txt")) 
+    }
+    fs.rmdir(demo_dir) 
+}
+fs.mkdir(demo_dir)
+say("   Created directory: " + demo_dir)
+
+# Write file
+demo_file <- path.join(demo_dir, "demo.txt")
+fs.write_text(demo_file, "Hello, ")
+fs.append_text(demo_file, "Levython!")
+content <- fs.read_text(demo_file)
+say("   File content: " + content)
+
+# Path operations
+say("   Basename: " + path.basename(demo_file))
+say("   File exists: " + str(fs.exists(demo_file)))
+
+# -----------------------------------------------------------------------------
+# Process Module
+# -----------------------------------------------------------------------------
+say("")
+say("⚙️  [Module 2] process - Process Management")
+say("   ────────────────────────────────────────────────────────────")
+
+pid <- process.getpid()
+say("   Current PID: " + str(pid))
+
+# Run command
+result <- process.run("echo Hello from Levython process module")
+say("   Command output: " + trim(result["stdout"]))
+say("   Exit code: " + str(result["exit_code"]))
+
+# Environment variables
+process.setenv("LEVY_DEMO", "native_modules")
+say("   Environment var: " + process.getenv("LEVY_DEMO", "not set"))
+
+# -----------------------------------------------------------------------------
+# JSON Module
+# -----------------------------------------------------------------------------
+say("")
+say("📋 [Module 3] json - JSON Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+# Stringify an object
+obj <- {"name": "Levython", "version": 1.0, "features": ["http", "async", "oop"]}
+json_str <- json.stringify(obj)
+say("   Stringify: " + json_str)
+
+# Parse JSON back
+parsed <- json.parse(json_str)
+say("   Parsed name: " + parsed["name"])
+say("   Parsed version: " + str(parsed["version"]))
+
+# -----------------------------------------------------------------------------
+# URL Module
+# -----------------------------------------------------------------------------
+say("")
+say("🌐 [Module 4] url - URL Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+test_url <- "https://example.com:8443/api/users?name=john&age=25#profile"
+parsed_url <- url.parse(test_url)
+
+say("   Parsed URL components:")
+say("     Scheme: " + parsed_url["scheme"])
+say("     Host: " + parsed_url["host"])
+say("     Port: " + str(parsed_url["port"]))
+say("     Path: " + parsed_url["path"])
+
+# Encode/Decode
+original <- "Hello World! Special chars: &=?"
+encoded <- url.encode(original)
+decoded <- url.decode(encoded)
+say("   Encode/Decode: " + original + " → " + decoded)
+
+# -----------------------------------------------------------------------------
+# Channel Module (Inter-thread Communication)
+# -----------------------------------------------------------------------------
+say("")
+say("📨 [Module 5] channel - Inter-Thread Communication")
+say("   ────────────────────────────────────────────────────────────")
+
+ch <- channel.create(3)
+channel.send(ch, "Message 1")
+channel.send(ch, "Message 2")
+channel.send(ch, "Message 3")
+
+say("   Sent 3 messages to channel")
+say("   Received: " + channel.recv(ch))
+say("   Received: " + channel.recv(ch))
+say("   Received: " + channel.recv(ch))
+
+# -----------------------------------------------------------------------------
+# Thread Module
+# -----------------------------------------------------------------------------
+say("")
+say("🧵 [Module 6] thread - Thread Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+thread_file <- path.join(demo_dir, "thread_test.txt")
+tid <- thread.spawn("echo Thread output > " + thread_file)
+code <- thread.join(tid)
+say("   Thread spawned and completed with exit code: " + str(code))
+
+if fs.exists(thread_file) {
+    say("   Thread wrote file: " + str(fs.exists(thread_file)))
+}
+
+# -----------------------------------------------------------------------------
+# Net Module (Network Operations)
+# -----------------------------------------------------------------------------
+say("")
+say("🔌 [Module 7] net - Network Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+# DNS Lookup
+ips <- net.dns_lookup("localhost")
+say("   DNS lookup 'localhost': " + str(ips))
+
+# UDP Socket example
+port1 <- 19191
+port2 <- 19192
+
+sock1 <- net.udp_bind(port1)
+sock2 <- net.udp_bind(port2)
+
+net.udp_sendto(sock1, "127.0.0.1", port2, "Hello UDP!")
+msg <- net.udp_recvfrom(sock2, 1024)
+say("   UDP message received: " + msg["data"])
+
+net.udp_close(sock1)
+net.udp_close(sock2)
+
+# -----------------------------------------------------------------------------
+# Cleanup
+# -----------------------------------------------------------------------------
+say("")
+say("🧹 Cleanup")
+say("   ────────────────────────────────────────────────────────────")
+
+if fs.exists(thread_file) { fs.remove(thread_file) }
+if fs.exists(demo_file) { fs.remove(demo_file) }
+if fs.exists(demo_dir) { fs.rmdir(demo_dir) }
+say("   ✅ Demo files cleaned up")
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+say("")
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║  ✅ NATIVE MODULES DEMO COMPLETE                                     ║")
+say("╠══════════════════════════════════════════════════════════════════════╣")
+say("║  Available Native Modules:                                           ║")
+say("║    • fs       - File system operations                               ║")
+say("║    • path     - Path manipulation                                    ║")
+say("║    • process  - Process management                                   ║")
+say("║    • json     - JSON parsing/stringifying                            ║")
+say("║    • url      - URL parsing/encoding                                 ║")
+say("║    • net      - TCP/UDP networking                                   ║")
+say("║    • thread   - Thread spawning                                      ║")
+say("║    • channel  - Inter-thread communication                           ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")

@@ -43,6 +43,15 @@ Provides syntax highlighting, code snippets, and language support for Levython p
 | `list` | Create a list |
 | `imp` | Import module |
 | `main` | Main file template |
+| `keys` | Get map keys |
+| `prun` | Run a process |
+| `cenv` | Load .env config |
+| `logj` | JSON logging |
+| `sha256` | SHA256 hash |
+| `dt` | Current UTC time |
+| `kloop` | Non-blocking input loop |
+| `httpget` | HTTP GET request |
+| `httpserver` | Minimal HTTP server |
 
 ## Syntax
 

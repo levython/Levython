@@ -1,753 +1,342 @@
-<#
-.SYNOPSIS
-    Levython Professional Windows Installer
-.DESCRIPTION
-    A complete GUI installer for Levython that:
-    - Auto-detects system architecture (x64/x86/ARM64)
-    - Builds from source or uses pre-built binary
-    - Configures system PATH
-    - Installs VS Code extension
-    - Creates file associations
-.NOTES
-    Version: 1.1.0
-    Author: Levython Authors
-#>
+param(
+    [switch]$SkipBuild,
+    [switch]$CreateSFX,
+    [string]$Architecture = "both"
+)
 
-# Requires -Version 5.1
-Add-Type -AssemblyName System.Windows.Forms
-Add-Type -AssemblyName System.Drawing
-Add-Type -AssemblyName PresentationFramework
+$ErrorActionPreference = "Stop"
 
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-$script:AppName = "Levython"
-$script:AppVersion = "1.1.0"
-$script:InstallDir = "$env:ProgramFiles\Levython"
-$script:SourceDir = $PSScriptRoot
-$script:LogFile = "$env:TEMP\levython-install.log"
+$script:ProjectRoot = Split-Path -Parent $PSScriptRoot
+$script:BuildDir = Join-Path $script:ProjectRoot "build"
+$script:ReleaseDir = Join-Path $script:ProjectRoot "releases"
+$script:InstallerDir = $PSScriptRoot
+$script:Version = "1.0.2"
 
-# Compiler selection (user-defined)
-# Allowed values: "mingw", "clang", "msvc"
-$script:CompilerChoice = "mingw"
-
-# Architecture detection
-$script:Architecture = switch ([System.Environment]::Is64BitOperatingSystem) {
-    $true { 
-        if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "ARM64" } 
-        else { "x64" }
-    }
-    $false { "x86" }
-}
-
-# ============================================================================
-# LOGGING
-# ============================================================================
-function Write-Log {
-    param([string]$Message, [string]$Level = "INFO")
-    $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
-    $logMessage = "[$timestamp] [$Level] $Message"
-    Add-Content -Path $script:LogFile -Value $logMessage -ErrorAction SilentlyContinue
-    
-    switch ($Level) {
-        "ERROR" { Write-Host $logMessage -ForegroundColor Red }
-        "WARN" { Write-Host $logMessage -ForegroundColor Yellow }
-        "SUCCESS" { Write-Host $logMessage -ForegroundColor Green }
-        default { Write-Host $logMessage }
-    }
-}
-
-# ============================================================================
-# UTILITY FUNCTIONS
-# ============================================================================
-function Test-Administrator {
-    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-function Get-VSCodePath {
-    $paths = @(
-        "$env:ProgramFiles\Microsoft VS Code\bin\code.cmd",
-        "${env:ProgramFiles(x86)}\Microsoft VS Code\bin\code.cmd",
-        "$env:LOCALAPPDATA\Programs\Microsoft VS Code\bin\code.cmd"
+# Determine architectures to build
+if ($Architecture -eq "both") {
+    $script:Architectures = @("x64", "x86")
+} elseif ($Architecture -eq "auto") {
+    $script:Architectures = @(
+        if ([Environment]::Is64BitOperatingSystem) {
+            if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "x64" }
+        } else { "x86" }
     )
+} else {
+    $script:Architectures = @($Architecture)
+}
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host "Levython Installer Build" -ForegroundColor Cyan
+Write-Host ("Version: " + $script:Version)
+Write-Host ("Targets: " + ($script:Architectures -join ", "))
+Write-Host "============================================================" -ForegroundColor Cyan
+Write-Host ""
+
+New-Item -ItemType Directory -Path $script:BuildDir -Force | Out-Null
+New-Item -ItemType Directory -Path $script:ReleaseDir -Force | Out-Null
+
+function Find-Compiler {
+    Write-Host "Searching for C++ compiler..." -ForegroundColor Yellow
     
-    foreach ($path in $paths) {
-        if (Test-Path $path) {
-            return $path
+    # Prefer MinGW g++ for cross-architecture builds (supports -m32 and -m64)
+    $gpp = Get-Command g++ -ErrorAction SilentlyContinue
+    if ($gpp) { 
+        Write-Host "  Found: g++ (MinGW)" -ForegroundColor Green
+        return @{ Type = "g++"; Path = $gpp.Source } 
+    }
+    
+    # Fallback to MSVC (harder to cross-compile x86 on x64)
+    $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+    if (Test-Path $vsWhere) {
+        $vsPath = & $vsWhere -latest -property installationPath 2>$null
+        if ($vsPath) { 
+            Write-Host "  Found: MSVC" -ForegroundColor Green
+            return @{ Type = "msvc"; VsPath = $vsPath } 
+        }
+    }
+    
+    # Fallback to Clang
+    $clang = Get-Command clang++ -ErrorAction SilentlyContinue
+    if ($clang) { 
+        Write-Host "  Found: clang++" -ForegroundColor Green
+        return @{ Type = "clang++"; Path = $clang.Source } 
+    }
+    
+    return $null
+}
+
+function Find-OpenSSL {
+    $candidates = @()
+    if ($env:OPENSSL_DIR) { $candidates += $env:OPENSSL_DIR }
+    
+    # Add Scoop paths
+    if ($env:USERPROFILE) {
+        $candidates += "$env:USERPROFILE\scoop\apps\openssl\current"
+        $candidates += "$env:USERPROFILE\scoop\apps\mingw\current\opt\include"
+    }
+    $candidates += "C:\ProgramData\scoop\apps\openssl\current"
+    
+    $candidates += "C:\OpenSSL-Win64"
+    $candidates += "C:\OpenSSL-Win32"
+    $candidates += "${env:ProgramFiles}\OpenSSL-Win64"
+    $candidates += "${env:ProgramFiles(x86)}\OpenSSL-Win32"
+    $candidates += "C:\vcpkg\installed\x64-windows"
+    $candidates += "C:\vcpkg\installed\x86-windows"
+    
+    # Check MinGW's built-in OpenSSL
+    $mingwPath = (Get-Command g++ -ErrorAction SilentlyContinue)
+    if ($mingwPath) {
+        $mingwRoot = Split-Path (Split-Path $mingwPath.Source)
+        $candidates += "$mingwRoot"
+        $candidates += "$mingwRoot\opt"
+    }
+
+    foreach ($base in $candidates) {
+        if (-not (Test-Path $base)) { continue }
+        $inc = Join-Path $base "include"
+        
+        # Try standard lib location first
+        $lib = Join-Path $base "lib"
+        if ((Test-Path $inc) -and (Test-Path $lib)) {
+            # Check for MSVC-style lib structure (VC\x64\MT for static linking with MinGW)
+            $vcLib = Join-Path $lib "VC\x64\MT"
+            if (Test-Path $vcLib) {
+                return @{ Include = $inc; Lib = $vcLib }
+            }
+            # Check if lib contains actual .lib or .a files
+            $hasLibs = (Get-ChildItem $lib -Filter "*.lib" -ErrorAction SilentlyContinue) -or (Get-ChildItem $lib -Filter "*.a" -ErrorAction SilentlyContinue)
+            if ($hasLibs) {
+                return @{ Include = $inc; Lib = $lib }
+            }
         }
     }
     return $null
 }
 
-function Find-Compiler {
-
-    Write-Log "Compiler choice: $script:CompilerChoice" "INFO"
-
-    switch ($script:CompilerChoice) {
-
-        "mingw" {
-            $gpp = Get-Command g++ -ErrorAction SilentlyContinue
-            if ($gpp) {
-                return @{ Type = "g++"; Path = $gpp.Source }
-            }
-            throw "MinGW selected, but g++ was not found in PATH. Please install MSYS2/MinGW and add it to PATH."
-        }
-
-        "clang" {
-            $clang = Get-Command clang++ -ErrorAction SilentlyContinue
-            if ($clang) {
-                return @{ Type = "clang++"; Path = $clang.Source }
-            }
-            throw "Clang selected, but clang++ was not found in PATH. Please install LLVM/Clang and add it to PATH."
-        }
-
-        "msvc" {
-
-            $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-            if (-not (Test-Path $vsWhere)) {
-                throw "Visual Studio Installer not found"
-            }
-
-            $vsPath = & $vsWhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-
-            if (-not $vsPath) {
-                throw "MSVC Build Tools not installed"
-            }
-
-            $vcvarsall = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsall.bat"
-            if (-not (Test-Path $vcvarsall)) {
-                throw "vcvarsall.bat not found"
-            }
-
-            return @{
-                Type   = "msvc"
-                VsPath = $vsPath
-            }
-        }
-        default {
-            throw "Invalid CompilerChoice: $script:CompilerChoice (expected 'mingw', 'clang', or 'msvc')"
-        }
-    }
-}
-
-function Add-ToPath {
-    param([string]$PathToAdd)
-    
-    $currentPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
-    if ($currentPath -notlike "*$PathToAdd*") {
-        $newPath = "$currentPath;$PathToAdd"
-        [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::Machine)
-        Write-Log "Added $PathToAdd to system PATH" "SUCCESS"
-        return $true
-    }
-    Write-Log "Path already contains $PathToAdd" "INFO"
-    return $false
-}
-
-function Remove-FromPath {
-    param([string]$PathToRemove)
-    
-    $currentPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
-    $paths = $currentPath -split ";" | Where-Object { $_ -ne $PathToRemove -and $_ -ne "" }
-    $newPath = $paths -join ";"
-    [Environment]::SetEnvironmentVariable("Path", $newPath, [EnvironmentVariableTarget]::Machine)
-}
-
-# ============================================================================
-# BUILD FUNCTIONS
-# ============================================================================
-function Build-Levython {
+function Build-Executable {
     param([string]$OutputPath)
-    
+
+    $srcFile = Join-Path $script:ProjectRoot "src\levython.cpp"
+    $httpFile = Join-Path $script:ProjectRoot "src\http_client.cpp"
+    $srcFiles = @($srcFile)
+    if (Test-Path $httpFile) { $srcFiles += $httpFile }
+    if (-not (Test-Path $srcFile)) { throw "Source file not found: $srcFile" }
+
     $compiler = Find-Compiler
-    if (-not $compiler) {
-        throw "No C++ compiler found. Please install MinGW-w64 or Visual Studio."
-    }
-    
-    Write-Log "Building Levython with $($compiler.Type)..." "INFO"
-    
-    $srcFile = Join-Path $script:SourceDir "src\levython.cpp"
-    if (-not (Test-Path $srcFile)) {
-        throw "Source file not found: $srcFile"
-    }
-    
-    $buildArgs = switch ($compiler.Type) {
+    if (-not $compiler) { throw "No C++ compiler found. Install MinGW-w64 or Visual Studio." }
+
+    Write-Host ("Building Levython (" + $script:Arch + ")...") -ForegroundColor Yellow
+
+    $openssl = Find-OpenSSL
+    if (-not $openssl) { throw "OpenSSL not found. Set OPENSSL_DIR or install OpenSSL (libssl/libcrypto)." }
+
+    switch ($compiler.Type) {
         "g++" {
-            @(
-                "-std=c++17",
-                "-O3",
-                "-DNDEBUG",
-                "-static",
-                "-static-libgcc",
-                "-static-libstdc++",
-                "-fexceptions",
-                "-o", $OutputPath,
-                $srcFile
-            )
+            $archFlag = switch ($script:Arch) { "x64" { "-m64" } "x86" { "-m32" } "arm64" { "" } }
+            
+            Write-Host ("  [INFO] Compiling with -O3 optimization (this takes time but makes it fast)") -ForegroundColor Cyan
+            Write-Host ("  [INFO] Total files: " + $srcFiles.Count) -ForegroundColor Cyan
+            
+            # Compile each source file separately to show progress
+            $objFiles = @()
+            $fileNum = 0
+            $totalFiles = $srcFiles.Count
+            
+            foreach ($srcFile in $srcFiles) {
+                $fileNum++
+                $fileName = [System.IO.Path]::GetFileNameWithoutExtension($srcFile)
+                $objFile = Join-Path $script:BuildDir "$fileName.o"
+                $objFiles += $objFile
+                
+                Write-Host ("") -NoNewline
+                Write-Host ("  [$fileNum/$totalFiles] Compiling $fileName.cpp...") -ForegroundColor Yellow -NoNewline
+                $startTime = Get-Date
+                
+                # Compile WITHOUT LTO to speed up individual compilation, add LTO only at link time
+                $compileArgs = @(
+                    "-std=c++17","-O3","-DNDEBUG","-fexceptions",
+                    "-I", $openssl.Include,
+                    "-c", $srcFile, "-o", $objFile
+                )
+                if ($archFlag) { $compileArgs = @($archFlag) + $compileArgs }
+                
+                # Show command being run
+                Write-Host (" (g++ " + ($compileArgs -join " ") + ")") -ForegroundColor DarkGray
+                
+                $compileOutput = & g++ $compileArgs 2>&1
+                if ($LASTEXITCODE -ne 0) {
+                    Write-Host ""
+                    Write-Host $compileOutput
+                    throw "Compilation of $fileName.cpp failed"
+                }
+                
+                $elapsed = ((Get-Date) - $startTime).TotalSeconds
+                Write-Host ("         [OK] Done in " + [math]::Round($elapsed, 1) + "s") -ForegroundColor Green
+            }
+            
+            # Link all object files with LTO
+            Write-Host ("") -NoNewline
+            Write-Host ("  [LINK] Linking with LTO optimization...") -ForegroundColor Yellow -NoNewline
+            $linkStartTime = Get-Date
+            
+            $linkArgs = @(
+                "-static","-static-libgcc","-static-libstdc++","-flto","-fexceptions",
+                "-L", $openssl.Lib,
+                "-o", $OutputPath
+            ) + $objFiles + @("-llibssl","-llibcrypto","-lws2_32","-lcrypt32")
+            if ($archFlag) { $linkArgs = @($archFlag) + $linkArgs }
+            
+            Write-Host (" (this may take 5-10 min on slow PCs)") -ForegroundColor DarkGray
+            
+            $linkOutput = & g++ $linkArgs 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host ""
+                Write-Host $linkOutput
+                throw "Linking failed"
+            }
+            
+            $linkElapsed = ((Get-Date) - $linkStartTime).TotalSeconds
+            Write-Host ("         [OK] Linked in " + [math]::Round($linkElapsed, 1) + "s") -ForegroundColor Green
+        }
+        "msvc" {
+            $vcvarsall = Join-Path $compiler.VsPath "VC\Auxiliary\Build\vcvarsall.bat"
+            $msvcArch = switch ($script:Arch) { "x64" { "x64" } "x86" { "x86" } "arm64" { "arm64" } }
+            $srcList = ($srcFiles | ForEach-Object { "`"$_`"" }) -join " "
+            $buildCmd = 'call "' + $vcvarsall + '" ' + $msvcArch + "`r`n" +
+                'cl.exe /std:c++17 /O2 /EHsc /DNDEBUG /I"' + $openssl.Include + '" /Fe:"' + $OutputPath + '" ' + $srcList + ' /link /LIBPATH:"' + $openssl.Lib + '" libssl.lib libcrypto.lib ws2_32.lib crypt32.lib'
+            $buildScript = Join-Path $script:BuildDir "build_msvc.bat"
+            Set-Content -Path $buildScript -Value $buildCmd
+            cmd.exe /c $buildScript 2>&1
         }
         "clang++" {
-            @(
-                "-std=c++17",
-                "-O3",
-                "-DNDEBUG",
-                "-static",
-                "-fexceptions",
-                "-o", $OutputPath,
-                $srcFile
-            )
-        }
-        "msvc" {
-            # For MSVC, we need to set up the environment
-            @(
-                "/std:c++17",
-                "/O2",
-                "/EHsc",
-                "/DNDEBUG",
-                "/Fe:`"$OutputPath`"",
-                $srcFile
-            )
+            $args = @(
+                "-std=c++17","-O3","-DNDEBUG","-static","-flto","-fexceptions",
+                "-I", $openssl.Include, "-L", $openssl.Lib,
+                "-lssl","-lcrypto","-lws2_32","-lcrypt32",
+                "-o", $OutputPath
+            ) + $srcFiles
+            & clang++ $args 2>&1
         }
     }
-    
-    try {
-        if ($compiler.Type -eq "msvc") {
 
-            # Use Developer Command Prompt
-            $vcvarsall = Join-Path $compiler.VsPath "VC\Auxiliary\Build\vcvarsall.bat"
-
-            # IMPORTANT: vcvarsall uses amd64, NOT x64
-            $arch = "amd64"
-
-            $cmd = "`"$vcvarsall`" $arch && cl.exe $($buildArgs -join ' ')"
-            Write-Log "Running MSVC build: $cmd" "INFO"
-
-            $result = cmd.exe /c $cmd 2>&1
-        }
-        else {
-            $result = & $compiler.Path $buildArgs 2>&1
-        }
-
-        if ($LASTEXITCODE -ne 0) {
-            throw "Build failed: $result"
-        }
-
-        if (-not (Test-Path $OutputPath)) {
-            throw "Build completed but executable not found"
-        }
-
-        Write-Log "Build successful: $OutputPath" "SUCCESS"
-        return $true
-    }
-    catch {
-        Write-Log "Build failed: $_" "ERROR"
-        throw
-    }
+    if ($LASTEXITCODE -ne 0) { throw "Build failed with exit code $LASTEXITCODE" }
+    if (-not (Test-Path $OutputPath)) { throw "Build completed but executable not found: $OutputPath" }
+    $sizeMB = [math]::Round(((Get-Item $OutputPath).Length / 1MB), 2)
+    Write-Host ("Build successful: " + $OutputPath + " (" + $sizeMB + " MB)") -ForegroundColor Green
 }
 
-# ============================================================================
-# INSTALLATION FUNCTIONS
-# ============================================================================
-function Install-Levython {
-    param(
-        [string]$InstallPath,
-        [bool]$AddToPath = $true,
-        [bool]$InstallVSCode = $true,
-        [bool]$CreateShortcut = $true,
-        [bool]$AssociateFiles = $true
-    )
-    
-    Write-Log "Starting Levython installation..." "INFO"
-    Write-Log "Install path: $InstallPath" "INFO"
-    Write-Log "Architecture: $script:Architecture" "INFO"
-    
-    # Create installation directory
-    if (-not (Test-Path $InstallPath)) {
-        New-Item -Path $InstallPath -ItemType Directory -Force | Out-Null
-        Write-Log "Created directory: $InstallPath" "INFO"
-    }
-    
-    # Check for pre-built binary
-    $prebuiltPath = Join-Path $script:SourceDir "levython.exe"
-    $targetExe = Join-Path $InstallPath "levython.exe"
-    
-    if (Test-Path $prebuiltPath) {
-        Write-Log "Using pre-built binary..." "INFO"
-        Copy-Item -Path $prebuiltPath -Destination $targetExe -Force
-    }
-    else {
-        Write-Log "Building from source..." "INFO"
-        Build-Levython -OutputPath $targetExe
-    }
-    
-    # Copy documentation
-    $docs = @("README.md", "LICENSE", "CHANGELOG.md", "IMPLEMENTATION_SUMMARY.md", "JIT_OPTIMIZATIONS.md")
+function Create-InstallerPackage {
+    Write-Host "Creating installer package..." -ForegroundColor Yellow
+
+    $packageDir = Join-Path $script:BuildDir "package"
+    Remove-Item -Path $packageDir -Recurse -Force -ErrorAction SilentlyContinue
+    New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+
+    $exePath = Join-Path $script:ReleaseDir ("levython-windows-" + $script:Arch + ".exe")
+    if (-not (Test-Path $exePath)) { $exePath = Join-Path $script:ProjectRoot "levython.exe" }
+    Copy-Item -Path $exePath -Destination (Join-Path $packageDir "levython.exe")
+
+    Copy-Item -Path (Join-Path $script:InstallerDir "LevythonInstaller.ps1") -Destination $packageDir
+    Copy-Item -Path (Join-Path $script:InstallerDir "Install-Levython.bat") -Destination $packageDir
+
+    $docs = @("README.md", "LICENSE", "CHANGELOG.md")
     foreach ($doc in $docs) {
-        $docPath = Join-Path $script:SourceDir $doc
-        if (Test-Path $docPath) {
-            Copy-Item -Path $docPath -Destination $InstallPath -Force
-        }
+        $docPath = Join-Path $script:ProjectRoot $doc
+        if (Test-Path $docPath) { Copy-Item -Path $docPath -Destination $packageDir }
     }
-    
-    # Copy examples
-    $examplesDir = Join-Path $script:SourceDir "examples"
-    if (Test-Path $examplesDir) {
-        $targetExamples = Join-Path $InstallPath "examples"
-        Copy-Item -Path $examplesDir -Destination $targetExamples -Recurse -Force
-        Write-Log "Copied examples" "INFO"
-    }
-    
-    # Add to PATH
-    if ($AddToPath) {
-        Add-ToPath -PathToAdd $InstallPath
-    }
-    
-    # Install VS Code extension
-    if ($InstallVSCode) {
-        $vscodePath = Get-VSCodePath
-        if ($vscodePath) {
-            $extensionDir = Join-Path $script:SourceDir "vscode-levython"
-            if (Test-Path $extensionDir) {
-                Write-Log "Installing VS Code extension..." "INFO"
-                try {
-                    & $vscodePath --install-extension $extensionDir --force 2>&1 | Out-Null
-                    Write-Log "VS Code extension installed" "SUCCESS"
-                }
-                catch {
-                    Write-Log "VS Code extension installation failed: $_" "WARN"
-                }
-            }
-        }
-        else {
-            Write-Log "VS Code not found, skipping extension installation" "WARN"
-        }
-    }
-    
-    # Create file associations
-    if ($AssociateFiles) {
-        try {
-            # .levy extension
-            New-Item -Path "HKCR:\.levy" -Force | Out-Null
-            Set-ItemProperty -Path "HKCR:\.levy" -Name "(Default)" -Value "LevythonScript"
-            
-            New-Item -Path "HKCR:\LevythonScript" -Force | Out-Null
-            Set-ItemProperty -Path "HKCR:\LevythonScript" -Name "(Default)" -Value "Levython Script"
-            
-            New-Item -Path "HKCR:\LevythonScript\shell\open\command" -Force | Out-Null
-            Set-ItemProperty -Path "HKCR:\LevythonScript\shell\open\command" -Name "(Default)" -Value "`"$targetExe`" `"%1`""
-            
-            # .ly extension
-            New-Item -Path "HKCR:\.ly" -Force | Out-Null
-            Set-ItemProperty -Path "HKCR:\.ly" -Name "(Default)" -Value "LevythonScript"
-            
-            Write-Log "File associations created" "SUCCESS"
-        }
-        catch {
-            Write-Log "File association failed: $_" "WARN"
-        }
-    }
-    
-    # Create Start Menu shortcut
-    if ($CreateShortcut) {
-        try {
-            $startMenu = [Environment]::GetFolderPath("CommonStartMenu")
-            $shortcutPath = Join-Path $startMenu "Programs\Levython.lnk"
-            
-            $shell = New-Object -ComObject WScript.Shell
-            $shortcut = $shell.CreateShortcut($shortcutPath)
-            $shortcut.TargetPath = $targetExe
-            $shortcut.WorkingDirectory = $InstallPath
-            $shortcut.Description = "Levython Programming Language"
-            $shortcut.Save()
-            
-            Write-Log "Start Menu shortcut created" "SUCCESS"
-        }
-        catch {
-            Write-Log "Shortcut creation failed: $_" "WARN"
-        }
-    }
-    
-    # Create uninstaller registry entry
-    $uninstallKey = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Levython"
-    New-Item -Path $uninstallKey -Force | Out-Null
-    Set-ItemProperty -Path $uninstallKey -Name "DisplayName" -Value "Levython $script:AppVersion"
-    Set-ItemProperty -Path $uninstallKey -Name "DisplayVersion" -Value $script:AppVersion
-    Set-ItemProperty -Path $uninstallKey -Name "Publisher" -Value "Levython Authors"
-    Set-ItemProperty -Path $uninstallKey -Name "InstallLocation" -Value $InstallPath
-    Set-ItemProperty -Path $uninstallKey -Name "UninstallString" -Value "powershell.exe -ExecutionPolicy Bypass -File `"$InstallPath\Uninstall.ps1`""
-    Set-ItemProperty -Path $uninstallKey -Name "DisplayIcon" -Value "$targetExe,0"
-    Set-ItemProperty -Path $uninstallKey -Name "NoModify" -Value 1 -Type DWord
-    Set-ItemProperty -Path $uninstallKey -Name "NoRepair" -Value 1 -Type DWord
-    
-    # Copy uninstaller
-    $uninstallerScript = @'
-# Levython Uninstaller
-$installDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
-# Remove from PATH
-$currentPath = [Environment]::GetEnvironmentVariable("Path", [EnvironmentVariableTarget]::Machine)
-$paths = $currentPath -split ";" | Where-Object { $_ -ne $installDir -and $_ -ne "" }
-[Environment]::SetEnvironmentVariable("Path", ($paths -join ";"), [EnvironmentVariableTarget]::Machine)
+    $examplesDir = Join-Path $script:ProjectRoot "examples"
+    if (Test-Path $examplesDir) { Copy-Item -Path $examplesDir -Destination (Join-Path $packageDir "examples") -Recurse }
 
-# Remove file associations
-Remove-Item -Path "HKCR:\.levy" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "HKCR:\.ly" -Force -ErrorAction SilentlyContinue
-Remove-Item -Path "HKCR:\LevythonScript" -Recurse -Force -ErrorAction SilentlyContinue
+    $vscodeDir = Join-Path $script:ProjectRoot "vscode-levython"
+    if (Test-Path $vscodeDir) { Copy-Item -Path $vscodeDir -Destination (Join-Path $packageDir "vscode-levython") -Recurse }
 
-# Remove Start Menu shortcut
-$startMenu = [Environment]::GetFolderPath("CommonStartMenu")
-Remove-Item -Path "$startMenu\Programs\Levython.lnk" -Force -ErrorAction SilentlyContinue
+    $zipPath = Join-Path $script:ReleaseDir ("levython-" + $script:Version + "-windows-" + $script:Arch + "-installer.zip")
+    Remove-Item -Path $zipPath -Force -ErrorAction SilentlyContinue
+    Compress-Archive -Path "$packageDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
 
-# Remove registry entry
-Remove-Item -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\Levython" -Force -ErrorAction SilentlyContinue
-
-# Remove installation directory
-Start-Sleep -Seconds 1
-Remove-Item -Path $installDir -Recurse -Force -ErrorAction SilentlyContinue
-
-[System.Windows.Forms.MessageBox]::Show("Levython has been uninstalled.", "Uninstall Complete", "OK", "Information")
-'@
-    
-    $uninstallerPath = Join-Path $InstallPath "Uninstall.ps1"
-    Set-Content -Path $uninstallerPath -Value $uninstallerScript
-    
-    Write-Log "Installation completed successfully!" "SUCCESS"
-    return $true
+    $sizeMB = [math]::Round(((Get-Item $zipPath).Length / 1MB), 2)
+    Write-Host ("Package created: " + $zipPath + " (" + $sizeMB + " MB)") -ForegroundColor Green
+    return $zipPath
 }
 
-# ============================================================================
-# GUI INSTALLER
-# ============================================================================
-function Show-InstallerGUI {
-    # Create main form
-    $form = New-Object System.Windows.Forms.Form
-    $form.Text = "Levython Installer"
-    $form.Size = New-Object System.Drawing.Size(600, 560)
-    $form.StartPosition = "CenterScreen"
-    $form.FormBorderStyle = "FixedDialog"
-    $form.MaximizeBox = $false
-    $form.BackColor = [System.Drawing.Color]::FromArgb(30, 30, 30)
-    $form.ForeColor = [System.Drawing.Color]::White
-    
-    # Header Panel
-    $headerPanel = New-Object System.Windows.Forms.Panel
-    $headerPanel.Size = New-Object System.Drawing.Size(600, 100)
-    $headerPanel.Location = New-Object System.Drawing.Point(0, 0)
-    $headerPanel.BackColor = [System.Drawing.Color]::FromArgb(0, 122, 204)
-    $form.Controls.Add($headerPanel)
-    
-    # Title Label
-    $titleLabel = New-Object System.Windows.Forms.Label
-    $titleLabel.Text = "LEVYTHON"
-    $titleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 28, [System.Drawing.FontStyle]::Bold)
-    $titleLabel.ForeColor = [System.Drawing.Color]::White
-    $titleLabel.Location = New-Object System.Drawing.Point(20, 15)
-    $titleLabel.AutoSize = $true
-    $headerPanel.Controls.Add($titleLabel)
-    
-    # Subtitle Label
-    $subtitleLabel = New-Object System.Windows.Forms.Label
-    $subtitleLabel.Text = "High Performance Programming Language v$script:AppVersion"
-    $subtitleLabel.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $subtitleLabel.ForeColor = [System.Drawing.Color]::FromArgb(200, 200, 200)
-    $subtitleLabel.Location = New-Object System.Drawing.Point(25, 70)
-    $subtitleLabel.AutoSize = $true
-    $headerPanel.Controls.Add($subtitleLabel)
-    
-    # Architecture Label
-    $archLabel = New-Object System.Windows.Forms.Label
-    $archLabel.Text = "Detected: $script:Architecture"
-    $archLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $archLabel.ForeColor = [System.Drawing.Color]::FromArgb(150, 255, 150)
-    $archLabel.Location = New-Object System.Drawing.Point(450, 70)
-    $archLabel.AutoSize = $true
-    $headerPanel.Controls.Add($archLabel)
-    
-    # Installation Path Group
-    $pathGroup = New-Object System.Windows.Forms.GroupBox
-    $pathGroup.Text = "Installation Directory"
-    $pathGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $pathGroup.ForeColor = [System.Drawing.Color]::White
-    $pathGroup.Size = New-Object System.Drawing.Size(550, 70)
-    $pathGroup.Location = New-Object System.Drawing.Point(20, 115)
-    $form.Controls.Add($pathGroup)
-    
-    $pathTextBox = New-Object System.Windows.Forms.TextBox
-    $pathTextBox.Text = $script:InstallDir
-    $pathTextBox.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $pathTextBox.Size = New-Object System.Drawing.Size(430, 25)
-    $pathTextBox.Location = New-Object System.Drawing.Point(15, 30)
-    $pathTextBox.BackColor = [System.Drawing.Color]::FromArgb(50, 50, 50)
-    $pathTextBox.ForeColor = [System.Drawing.Color]::White
-    $pathGroup.Controls.Add($pathTextBox)
-    
-    $browseButton = New-Object System.Windows.Forms.Button
-    $browseButton.Text = "Browse..."
-    $browseButton.Size = New-Object System.Drawing.Size(85, 28)
-    $browseButton.Location = New-Object System.Drawing.Point(450, 28)
-    $browseButton.FlatStyle = "Flat"
-    $browseButton.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-    $browseButton.ForeColor = [System.Drawing.Color]::White
-    $browseButton.Add_Click({
-            $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
-            $folderDialog.Description = "Select installation directory"
-            $folderDialog.SelectedPath = $pathTextBox.Text
-            if ($folderDialog.ShowDialog() -eq "OK") {
-                $pathTextBox.Text = $folderDialog.SelectedPath
-            }
-        })
-    $pathGroup.Controls.Add($browseButton)
-    
-    # Options Group
-    $optionsGroup = New-Object System.Windows.Forms.GroupBox
-    $optionsGroup.Text = "Installation Options"
-    $optionsGroup.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $optionsGroup.ForeColor = [System.Drawing.Color]::White
-    $optionsGroup.Size = New-Object System.Drawing.Size(550, 245)
-    $optionsGroup.Location = New-Object System.Drawing.Point(20, 195)
-    $form.Controls.Add($optionsGroup)
+function Create-SelfExtractor {
+    param([string]$ZipPath)
 
-    # Compiler label
-    $lblCompiler = New-Object System.Windows.Forms.Label
-    $lblCompiler.Text = "Select Compiler:"
-    $lblCompiler.Location = New-Object System.Drawing.Point(15, 25)
-    $lblCompiler.AutoSize = $true
-    $optionsGroup.Controls.Add($lblCompiler)
+    Write-Host "Creating self-extracting installer..." -ForegroundColor Yellow
 
-    $rbMinGW = New-Object System.Windows.Forms.RadioButton
-    $rbMinGW.Text = "MinGW (g++) - Recommended"
-    $rbMinGW.Location = New-Object System.Drawing.Point(30, 45)
-    $rbMinGW.AutoSize = $true
-    $rbMinGW.Checked = $true
-    $optionsGroup.Controls.Add($rbMinGW)
+    $sevenZip = Get-Command 7z -ErrorAction SilentlyContinue
+    if (-not $sevenZip) {
+        $sevenZipPaths = @("$env:ProgramFiles\7-Zip\7z.exe", "${env:ProgramFiles(x86)}\7-Zip\7z.exe")
+        foreach ($path in $sevenZipPaths) {
+            if (Test-Path $path) { $sevenZip = @{ Source = $path }; break }
+        }
+    }
+    if (-not $sevenZip) { Write-Host "7-Zip not found, skipping SFX creation" -ForegroundColor Yellow; return $null }
 
-    $rbClang = New-Object System.Windows.Forms.RadioButton
-    $rbClang.Text = "Clang (clang++) - Advanced / Fast"
-    $rbClang.Location = New-Object System.Drawing.Point(30, 70)
-    $rbClang.AutoSize = $true
-    $optionsGroup.Controls.Add($rbClang)
+    $sfxPath = Join-Path $script:ReleaseDir ("levython-" + $script:Version + "-windows-" + $script:Arch + "-setup.exe")
+    $packageDir = Join-Path $script:BuildDir "package"
+    $archivePath = Join-Path $script:BuildDir "installer.7z"
+    & $sevenZip.Source a -t7z -mx=9 $archivePath "$packageDir\*" | Out-Null
 
-    $rbMSVC = New-Object System.Windows.Forms.RadioButton
-    $rbMSVC.Text = "Visual Studio (MSVC) - Experimental (may fail)"
-    $rbMSVC.Location = New-Object System.Drawing.Point(30, 95)
-    $rbMSVC.AutoSize = $true
-    $optionsGroup.Controls.Add($rbMSVC)
-    
-    $chkPath = New-Object System.Windows.Forms.CheckBox
-    $chkPath.Text = "Add Levython to system PATH (recommended)"
-    $chkPath.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $chkPath.Size = New-Object System.Drawing.Size(500, 25)
-    $chkPath.Location = New-Object System.Drawing.Point(15, 130)
-    $chkPath.ForeColor = [System.Drawing.Color]::White
-    $chkPath.Checked = $true
-    $optionsGroup.Controls.Add($chkPath)
-    
-    $chkVSCode = New-Object System.Windows.Forms.CheckBox
-    $chkVSCode.Text = "Install VS Code extension (syntax highlighting and snippets)"
-    $chkVSCode.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $chkVSCode.Size = New-Object System.Drawing.Size(500, 25)
-    $chkVSCode.Location = New-Object System.Drawing.Point(15, 155)
-    $chkVSCode.ForeColor = [System.Drawing.Color]::White
-    $chkVSCode.Checked = $true
-    $optionsGroup.Controls.Add($chkVSCode)
-    
-    $chkAssociate = New-Object System.Windows.Forms.CheckBox
-    $chkAssociate.Text = "Associate .levy and .ly files with Levython"
-    $chkAssociate.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $chkAssociate.Size = New-Object System.Drawing.Size(500, 25)
-    $chkAssociate.Location = New-Object System.Drawing.Point(15, 180)
-    $chkAssociate.ForeColor = [System.Drawing.Color]::White
-    $chkAssociate.Checked = $true
-    $optionsGroup.Controls.Add($chkAssociate)
-    
-    $chkShortcut = New-Object System.Windows.Forms.CheckBox
-    $chkShortcut.Text = "Create Start Menu shortcut"
-    $chkShortcut.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $chkShortcut.Size = New-Object System.Drawing.Size(500, 25)
-    $chkShortcut.Location = New-Object System.Drawing.Point(15, 205)
-    $chkShortcut.ForeColor = [System.Drawing.Color]::White
-    $chkShortcut.Checked = $true
-    $optionsGroup.Controls.Add($chkShortcut)
-    
-    # Progress Bar
-    $progressBar = New-Object System.Windows.Forms.ProgressBar
-    $progressBar.Size = New-Object System.Drawing.Size(550, 25)
-    $progressBar.Location = New-Object System.Drawing.Point(20, 360)
-    $progressBar.Style = "Continuous"
-    $progressBar.Visible = $false
-    $form.Controls.Add($progressBar)
-    
-    # Status Label
-    $statusLabel = New-Object System.Windows.Forms.Label
-    $statusLabel.Text = ""
-    $statusLabel.Font = New-Object System.Drawing.Font("Segoe UI", 9)
-    $statusLabel.ForeColor = [System.Drawing.Color]::FromArgb(150, 150, 150)
-    $statusLabel.Size = New-Object System.Drawing.Size(550, 20)
-    $statusLabel.Location = New-Object System.Drawing.Point(20, 390)
-    $form.Controls.Add($statusLabel)
-    
-    # Install Button
-    $installButton = New-Object System.Windows.Forms.Button
-    $installButton.Text = "Install"
-    $installButton.Size = New-Object System.Drawing.Size(120, 40)
-    $installButton.Location = New-Object System.Drawing.Point(340, 470)
-    $installButton.FlatStyle = "Flat"
-    $installButton.BackColor = [System.Drawing.Color]::FromArgb(0, 122, 204)
-    $installButton.ForeColor = [System.Drawing.Color]::White
-    $installButton.Font = New-Object System.Drawing.Font("Segoe UI", 11, [System.Drawing.FontStyle]::Bold)
-    $installButton.Add_Click({
-            if (-not (Test-Administrator)) {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Administrator privileges required. Please run as Administrator.",
-                    "Privilege Required",
-                    "OK",
-                    "Warning"
-                )
-                return
-            }
-        
-            $installButton.Enabled = $false
-            $cancelButton.Enabled = $false
-            $progressBar.Visible = $true
-            $progressBar.Value = 0
-        
-            try {
-                $statusLabel.Text = "Preparing installation..."
-                $progressBar.Value = 10
-                $form.Refresh()
-            
-                if ($rbMinGW.Checked) {
-                    $script:CompilerChoice = "mingw"
-                }
-                elseif ($rbClang.Checked) {
-                    $script:CompilerChoice = "clang"
-                }
-                elseif ($rbMSVC.Checked) {
-                    $script:CompilerChoice = "msvc"
-                }
-                else {
-                    throw "No compiler selected"
-                }
+    $sfxModule = Join-Path (Split-Path $sevenZip.Source) "7z.sfx"
+    if (-not (Test-Path $sfxModule)) { Write-Host "SFX module not found" -ForegroundColor Yellow; return $null }
 
-                Write-Log "User selected compiler: $script:CompilerChoice"
+    $configPath = Join-Path $script:BuildDir "config.txt"
+    $cfg = ';!@Install@!UTF-8!' + "`r`n" +
+        'Title="Levython Installer"' + "`r`n" +
+        'BeginPrompt="Install Levython ' + $script:Version + '?"' + "`r`n" +
+        'RunProgram="Install-Levython.bat"' + "`r`n" +
+        ';!@InstallEnd@!'
+    Set-Content -Path $configPath -Value $cfg
 
-                if ($script:CompilerChoice -eq "clang") {
-                    Write-Log "Clang selected - ensure LLVM is installed and clang++ is in PATH" "INFO"
-                }
+    $sfxBytes = [System.IO.File]::ReadAllBytes($sfxModule)
+    $configBytes = [System.IO.File]::ReadAllBytes($configPath)
+    $archiveBytes = [System.IO.File]::ReadAllBytes($archivePath)
 
-                if ($script:CompilerChoice -eq "msvc") {
-                    Write-Log "MSVC is experimental and may fail due to VM dispatch optimizations" "WARN"
-                }
+    $output = New-Object byte[] ($sfxBytes.Length + $configBytes.Length + $archiveBytes.Length)
+    [System.Buffer]::BlockCopy($sfxBytes, 0, $output, 0, $sfxBytes.Length)
+    [System.Buffer]::BlockCopy($configBytes, 0, $output, $sfxBytes.Length, $configBytes.Length)
+    [System.Buffer]::BlockCopy($archiveBytes, 0, $output, $sfxBytes.Length + $configBytes.Length, $archiveBytes.Length)
+    [System.IO.File]::WriteAllBytes($sfxPath, $output)
 
-                $statusLabel.Text = "Installing Levython..."
-                $progressBar.Value = 30
-                $form.Refresh()
-            
-                Install-Levython `
-                    -InstallPath $pathTextBox.Text `
-                    -AddToPath $chkPath.Checked `
-                    -InstallVSCode $chkVSCode.Checked `
-                    -CreateShortcut $chkShortcut.Checked `
-                    -AssociateFiles $chkAssociate.Checked
-            
-                $progressBar.Value = 100
-                $statusLabel.Text = "Installation complete!"
-            
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Levython has been installed successfully!`n`nYou can now use 'levython' from any command prompt.`n`nCheck out the examples in:`n$($pathTextBox.Text)\examples",
-                    "Installation Complete",
-                    "OK",
-                    "Information"
-                )
-            
-                $form.Close()
-            }
-            catch {
-                [System.Windows.Forms.MessageBox]::Show(
-                    "Installation failed: $_`n`nCheck the log file: $script:LogFile",
-                    "Installation Error",
-                    "OK",
-                    "Error"
-                )
-                $installButton.Enabled = $true
-                $cancelButton.Enabled = $true
-                $progressBar.Visible = $false
-            }
-        })
-    $form.Controls.Add($installButton)
-    
-    # Cancel Button
-    $cancelButton = New-Object System.Windows.Forms.Button
-    $cancelButton.Text = "Cancel"
-    $cancelButton.Size = New-Object System.Drawing.Size(100, 40)
-    $cancelButton.Location = New-Object System.Drawing.Point(470, 470)
-    $cancelButton.FlatStyle = "Flat"
-    $cancelButton.BackColor = [System.Drawing.Color]::FromArgb(60, 60, 60)
-    $cancelButton.ForeColor = [System.Drawing.Color]::White
-    $cancelButton.Font = New-Object System.Drawing.Font("Segoe UI", 10)
-    $cancelButton.Add_Click({
-            $form.Close()
-        })
-    $form.Controls.Add($cancelButton)
-    
-    # Footer
-    $footerLabel = New-Object System.Windows.Forms.Label
-    $footerLabel.Text = "(c) 2024-2026 Levython Authors | JIT-Compiled * Bytecode VM * Faster than C"
-    $footerLabel.Font = New-Object System.Drawing.Font("Segoe UI", 8)
-    $footerLabel.ForeColor = [System.Drawing.Color]::FromArgb(100, 100, 100)
-    $footerLabel.Location = New-Object System.Drawing.Point(20, 445)
-    $footerLabel.AutoSize = $true
-    $form.Controls.Add($footerLabel)
-    
-    # Show form
-    $form.ShowDialog() | Out-Null
+    $sizeMB = [math]::Round(((Get-Item $sfxPath).Length / 1MB), 2)
+    Write-Host ("SFX created: " + $sfxPath + " (" + $sizeMB + " MB)") -ForegroundColor Green
+    return $sfxPath
 }
 
-# ============================================================================
-# MAIN ENTRY POINT
-# ============================================================================
-function Main {
-    param(
-        [switch]$Silent,
-        [string]$InstallPath = $script:InstallDir
-    )
-    
-    Write-Log "Levython Installer v$script:AppVersion" "INFO"
-    Write-Log "Detected architecture: $script:Architecture" "INFO"
-    
-    if ($Silent) {
-        # Silent installation
-        if (-not (Test-Administrator)) {
-            Write-Log "Administrator privileges required for silent installation" "ERROR"
-            exit 1
+try {
+    foreach ($arch in $script:Architectures) {
+        $script:Arch = $arch
+        
+        Write-Host ""
+        Write-Host "============================================================" -ForegroundColor Magenta
+        Write-Host ("Building for: " + $arch) -ForegroundColor Magenta
+        Write-Host "============================================================" -ForegroundColor Magenta
+        Write-Host ""
+        
+        if (-not $SkipBuild) {
+            $exePath = Join-Path $script:ReleaseDir ("levython-windows-" + $script:Arch + ".exe")
+            Build-Executable -OutputPath $exePath
         }
         
-        try {
-            Install-Levython -InstallPath $InstallPath
-            exit 0
+        $zipPath = Create-InstallerPackage
+        
+        if ($CreateSFX) { 
+            Create-SelfExtractor -ZipPath $zipPath 
         }
-        catch {
-            Write-Log "Installation failed: $_" "ERROR"
-            exit 1
-        }
+        
+        Write-Host ""
+        Write-Host ("[OK] Build completed for " + $arch) -ForegroundColor Green
     }
-    else {
-        # GUI installation
-        Show-InstallerGUI
-    }
-}
 
-# Run installer
-if ($args -contains "-Silent" -or $args -contains "--silent") {
-    $installPath = $script:InstallDir
-    for ($i = 0; $i -lt $args.Count; $i++) {
-        if ($args[$i] -eq "-InstallPath" -or $args[$i] -eq "--install-path") {
-            $installPath = $args[$i + 1]
-        }
-    }
-    Main -Silent -InstallPath $installPath
-}
-else {
-    Main
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "All builds completed successfully!" -ForegroundColor Green
+    Write-Host ("Output files in: " + $script:ReleaseDir) -ForegroundColor Cyan
+    Write-Host "============================================================" -ForegroundColor Green
+} catch {
+    Write-Host ("Build failed: " + $_) -ForegroundColor Red
+    exit 1
 }

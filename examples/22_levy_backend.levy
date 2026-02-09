@@ -1,0 +1,123 @@
+import net
+import log
+import process
+
+# Basic HTTP server using net.* (single-threaded)
+HOST <- process.getenv("LEVY_BACKEND_HOST", "127.0.0.1")
+PORT <- int(process.getenv("LEVY_BACKEND_PORT", "18082"))
+
+act has_key(m, k) {
+    ok <- "no"
+    try {
+        x <- m[k]
+        ok <- "yes"
+    } catch {
+    }
+    -> ok == "yes"
+}
+
+act parse_request(raw) {
+    parts <- split(raw, "\r\n\r\n")
+    head <- parts[0]
+    body <- ""
+    if len(parts) > 1 { body <- parts[1] }
+
+    lines <- split(head, "\r\n")
+    reqline <- lines[0]
+    reqparts <- split(reqline, " ")
+    m <- reqparts[0]
+    p <- reqparts[1]
+    v <- reqparts[2]
+
+    headers <- {}
+    i <- 1
+    while i < len(lines) {
+        line <- lines[i]
+        i <- i + 1
+        if line == "" { break }
+        kv <- split(line, ":")
+        if len(kv) >= 2 {
+            key <- kv[0]
+            val <- kv[1]
+            headers[key] <- val
+        }
+    }
+
+    -> {"method": m, "path": p, "version": v, "headers": headers, "body": body}
+}
+
+act http_response(status, body, headers) {
+    status_text <- "OK"
+    if status == 404 { status_text <- "Not Found" }
+    if status == 500 { status_text <- "Internal Server Error" }
+    if not has_key(headers, "Content-Type") { headers["Content-Type"] <- "text/plain" }
+    headers["Content-Length"] <- str(len(body))
+    headers["Connection"] <- "close"
+
+    out <- "HTTP/1.1 " + str(status) + " " + status_text + "\r\n"
+    for k in headers {
+        out <- out + k + ": " + headers[k] + "\r\n"
+    }
+    out <- out + "\r\n" + body
+    -> out
+}
+
+log.set_json(yes)
+log.set_level("info")
+log.info("backend_start", {"host": HOST, "port": PORT})
+
+listener <- net.tcp_listen(HOST, PORT, 128)
+
+while yes {
+    conn <- net.tcp_accept(listener)
+    if conn["socket"] == 0 { continue }
+
+    sock <- conn["socket"]
+    data <- ""
+
+    # read until headers complete
+    while not contains(data, "\r\n\r\n") {
+        chunk <- net.tcp_recv(sock, 4096)
+        if chunk == "" { break }
+        data <- data + chunk
+    }
+
+    if data == "" {
+        net.tcp_close(sock)
+        continue
+    }
+
+    req <- parse_request(data)
+    headers <- req["headers"]
+    body <- req["body"]
+    clen <- 0
+    if has_key(headers, "Content-Length") { clen <- int(headers["Content-Length"]) }
+    if clen > 0 and len(body) < clen {
+        while len(body) < clen {
+            chunk <- net.tcp_recv(sock, 4096)
+            if chunk == "" { break }
+            body <- body + chunk
+        }
+        req["body"] <- body
+    }
+
+    method <- req["method"]
+    path <- req["path"]
+    log.info("request", {"method": method, "path": path, "len": len(req["body"])})
+
+    if method == "GET" and path == "/" {
+        resp <- http_response(200, "Levython backend running", {"Content-Type": "text/plain"})
+    } else if method == "GET" and path == "/health" {
+        resp <- http_response(200, "ok", {"Content-Type": "text/plain"})
+    } else if method == "GET" and contains(path, "/echo?") {
+        resp <- http_response(200, "echo " + path, {"Content-Type": "text/plain"})
+    } else if method == "POST" and path == "/json" {
+        body <- req["body"]
+        resp <- http_response(200, "{\"received\":true,\"len\":" + str(len(body)) + "}", {"Content-Type": "application/json"})
+    } else {
+        resp <- http_response(404, "not found", {"Content-Type": "text/plain"})
+    }
+
+    net.tcp_send(sock, resp)
+    net.tcp_close(sock)
+}

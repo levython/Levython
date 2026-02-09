@@ -2,7 +2,28 @@
 
 All notable changes to Levython will be documented in this file.
 
-## [1.0.2] - 2026-02-03
+## [1.0.2] - 2026-02-08
+
+### 🚀 Standard Library Expansion
+
+**New Modules & APIs:**
+- ✅ **crypto**: `sha256`, `sha512`, `hmac_sha256`, `random_bytes`, `hex/base64 encode/decode`
+- ✅ **datetime**: `now_utc`, `now_local`, `format`, `parse`, `sleep_ms`, `epoch_ms`
+- ✅ **log**: structured logging with JSON or text output
+- ✅ **config**: `.env` loader and typed getters
+- ✅ **input**: non-blocking key input for games/interactive apps
+
+**Filesystem & Process:**
+- ✅ **path**: `exists`, `is_file`, `is_dir`, `read_text`, `write_text`, `listdir`, `mkdir`, `remove`, `rmdir`
+- ✅ **process.run**: argv lists, env, cwd, stdout/stderr capture
+
+**Networking:**
+- ✅ **net**: `dns_lookup`
+- ✅ **http_server.levy**: userland HTTP server helper with request parsing and response builder
+
+**Build/Runtime:**
+- ✅ Local module imports supported at runtime when `.levy/.ly` files exist
+- ✅ Version bumps and documentation alignment
 
 ### 🪟 Windows Support & Professional Installer
 

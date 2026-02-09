@@ -120,7 +120,7 @@ print_banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║${NC}     ${GREEN}🚀 LEVYTHON INSTALLER${NC}                                          ${CYAN}║${NC}"
-    echo -e "${CYAN}║${NC}     ${YELLOW}The Future of Systems Programming${NC}                             ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}     ${YELLOW}Be better than yesterday${NC}                             ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
 }
@@ -383,6 +383,8 @@ compile_levython() {
     # Determine optimal compilation flags
     OS=$(detect_os)
     COMPILE_FLAGS="-std=c++17 -O3 -DNDEBUG"
+    SRC_FILES="$SRC_FILE"
+    LINK_LIBS="-lssl -lcrypto"
     
     # Test if march=native works
     if echo 'int main(){}' | $CXX -x c++ -march=native - -o /tmp/march_test$$ 2>/dev/null; then
@@ -401,8 +403,14 @@ compile_levython() {
         "macos")
             # macOS optimizations
             COMPILE_FLAGS="$COMPILE_FLAGS -mmacosx-version-min=10.14"
+            LINK_LIBS="$LINK_LIBS -framework Security -framework CoreFoundation"
             ;;
     esac
+
+    # HTTP client is implemented in a separate translation unit
+    if [ -f "$SCRIPT_DIR/src/http_client.cpp" ]; then
+        SRC_FILES="$SRC_FILES $SCRIPT_DIR/src/http_client.cpp"
+    fi
     
     # Try compilation with multiple fallback strategies
     local compiled=false
@@ -410,7 +418,7 @@ compile_levython() {
     
     # Strategy 1: Full optimization
     step "Attempting optimized compilation..."
-    if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>/dev/null; then
+    if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>/dev/null; then
         compiled=true
         success "Compiled with full optimizations"
     else
@@ -418,7 +426,7 @@ compile_levython() {
         
         # Strategy 2: Reduced optimization
         COMPILE_FLAGS="-std=c++17 -O2 -DNDEBUG"
-        if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>/dev/null; then
+        if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>/dev/null; then
             compiled=true
             success "Compiled with reduced optimization"
         else
@@ -426,12 +434,12 @@ compile_levython() {
             
             # Strategy 3: Basic compilation
             COMPILE_FLAGS="-std=c++17"
-            if $CXX $COMPILE_FLAGS -o "$output_file" "$SRC_FILE" 2>compile_error.log; then
+            if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>compile_error.log; then
                 compiled=true
                 warn "Compiled with basic flags (no optimization)"
             else
                 # Strategy 4: Show detailed error and suggest fixes
-                error "Compilation failed. Error details:\n$(cat compile_error.log 2>/dev/null || echo 'No error log available')\n\nTroubleshooting:\n  1. Ensure C++17 support: $CXX -std=c++17 --version\n  2. Check disk space: df -h\n  3. Verify source integrity: wc -l $SRC_FILE\n  4. Try manual compilation: $CXX -std=c++17 -o levython $SRC_FILE"
+                error "Compilation failed. Error details:\n$(cat compile_error.log 2>/dev/null || echo 'No error log available')\n\nTroubleshooting:\n  1. Ensure C++17 support: $CXX -std=c++17 --version\n  2. Check disk space: df -h\n  3. Verify source integrity: wc -l $SRC_FILE\n  4. Try manual compilation: $CXX -std=c++17 -o levython $SRC_FILES $LINK_LIBS"
             fi
         fi
     fi

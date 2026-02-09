@@ -1,0 +1,105 @@
+# ============================================================================
+# LEVYTHON ASYNC MODULE EXAMPLE
+# ============================================================================
+# This example demonstrates asynchronous programming in Levython.
+# Run with: ./levython examples/async_demo.levy
+# ============================================================================
+
+import async
+import fs
+import process
+
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON ASYNC MODULE EXAMPLE                              ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")
+
+# -----------------------------------------------------------------------------
+# Async Sleep (Timer)
+# -----------------------------------------------------------------------------
+say("")
+say("⏱️  [Demo 1] Async Sleep / Timers")
+say("   ────────────────────────────────────────────────────────────")
+
+say("   Starting async sleep for 100ms...")
+timer <- async.sleep(100)
+result <- await(timer, 5000)
+say("   ✅ Async sleep completed: " + str(result))
+
+# -----------------------------------------------------------------------------
+# Async Process Spawn
+# -----------------------------------------------------------------------------
+say("")
+say("🚀 [Demo 2] Async Process Execution")
+say("   ────────────────────────────────────────────────────────────")
+
+out_file <- "async_demo_output.txt"
+if fs.exists(out_file) { fs.remove(out_file) }
+
+say("   Spawning async process...")
+proc <- async.spawn("echo 'Hello from async process!' > " + out_file)
+
+say("   Waiting for process completion...")
+proc_result <- await(proc, 10000)
+say("   Process exit code: " + str(proc_result["exit_code"]))
+
+if fs.exists(out_file) {
+    content <- fs.read_text(out_file)
+    say("   File content: " + trim(content))
+    fs.remove(out_file)
+}
+
+# -----------------------------------------------------------------------------
+# Multiple Async Operations
+# -----------------------------------------------------------------------------
+say("")
+say("🔄 [Demo 3] Multiple Concurrent Async Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+say("   Starting 3 concurrent timers...")
+timer1 <- async.sleep(50)
+timer2 <- async.sleep(75)
+timer3 <- async.sleep(100)
+
+say("   Waiting for timer 1 (50ms)...")
+await(timer1, 2000)
+say("   ✅ Timer 1 done")
+
+say("   Waiting for timer 2 (75ms)...")
+await(timer2, 2000)
+say("   ✅ Timer 2 done")
+
+say("   Waiting for timer 3 (100ms)...")
+await(timer3, 2000)
+say("   ✅ Timer 3 done")
+
+say("   All concurrent operations completed!")
+
+# -----------------------------------------------------------------------------
+# Async Module Functions
+# -----------------------------------------------------------------------------
+say("")
+say("📚 [Demo 4] Available Async Functions")
+say("   ────────────────────────────────────────────────────────────")
+
+say("   async.spawn    - Exists: " + str(async["spawn"] != none))
+say("   async.sleep    - Exists: " + str(async["sleep"] != none))
+say("   async.tcp_recv - Exists: " + str(async["tcp_recv"] != none))
+say("   async.tcp_send - Exists: " + str(async["tcp_send"] != none))
+say("   async.await    - Exists: " + str(async["await"] != none))
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+say("")
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║  ✅ ASYNC MODULE DEMO COMPLETE                                       ║")
+say("╠══════════════════════════════════════════════════════════════════════╣")
+say("║  Async Functions Available:                                          ║")
+say("║    • async.sleep(ms)         - Async timer/delay                     ║")
+say("║    • async.spawn(cmd)        - Spawn async process                   ║")
+say("║    • async.tcp_send(sock, d) - Async TCP send                        ║")
+say("║    • async.tcp_recv(sock, n) - Async TCP receive                     ║")
+say("║    • await(promise, timeout) - Wait for async operation              ║")
+say("║                                                                      ║")
+say("║  Use async operations for non-blocking I/O in servers and clients!  ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")

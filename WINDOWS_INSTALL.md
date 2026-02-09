@@ -9,7 +9,7 @@ Complete installation and build guide for Windows users.
 Download and run the professional installer:
 
 1. **Download** the latest installer:
-   - [levython-1.0.1-windows-installer.exe](https://github.com/levython/Levython/releases/latest) (All versions: 32-bit & 64-bit)
+   - [levython-1.0.2-windows-installer.exe](https://github.com/levython/Levython/releases/latest) (All versions: 32-bit & 64-bit)
 
 2. **Run** the installer with administrator privileges
 
@@ -121,7 +121,7 @@ cl /EHsc /std:c++17 /O2 /GL /DNDEBUG src\levython.cpp /Fe:levython.exe /link /LT
    build-installer.bat
    ```
 
-4. **Output**: `releases\levython-1.0.1-windows-installer.exe`
+4. **Output**: `releases\levython-1.0.2-windows-installer.exe`
 
 ---
 

@@ -1,0 +1,11 @@
+{
+    "iconDefinitions": {
+        "levython-file": {
+            "iconPath": "./icon.png"
+        }
+    },
+    "fileExtensions": {
+        "levy": "levython-file",
+        "ly": "levython-file"
+    }
+}

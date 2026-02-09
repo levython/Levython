@@ -110,5 +110,73 @@
             ""
         ],
         "description": "Main file template"
+    },
+    "Keys (Map)": {
+        "prefix": "keys",
+        "body": "ks <- keys(${1:map})",
+        "description": "Get map keys"
+    },
+    "Process Run": {
+        "prefix": "prun",
+        "body": "res <- process.run(${1:\"/bin/sh -c \\\"echo hi\\\"\"})",
+        "description": "Run a process and capture output"
+    },
+    "Config Load .env": {
+        "prefix": "cenv",
+        "body": "config.load_env(${1:\".env\"})",
+        "description": "Load .env configuration"
+    },
+    "Log JSON": {
+        "prefix": "logj",
+        "body": [
+            "log.set_json(yes)",
+            "log.set_level(\"info\")",
+            "log.info(${1:\"message\"}, ${2:{}})"
+        ],
+        "description": "Structured JSON logging"
+    },
+    "Crypto SHA256": {
+        "prefix": "sha256",
+        "body": "hash <- crypto.sha256(${1:\"data\"})",
+        "description": "SHA256 hash"
+    },
+    "Datetime Now": {
+        "prefix": "dt",
+        "body": "now <- datetime.now_utc()",
+        "description": "Current UTC time"
+    },
+    "Input Poll Loop": {
+        "prefix": "kloop",
+        "body": [
+            "input.enable_raw()",
+            "while yes {",
+            "    r <- input.poll()",
+            "    if r[\"ok\"] == yes {",
+            "        say(\"key=\" + r[\"key\"])",
+            "    }",
+            "    datetime.sleep_ms(10)",
+            "}",
+            "input.disable_raw()"
+        ],
+        "description": "Non-blocking key input loop"
+    },
+    "HTTP GET": {
+        "prefix": "httpget",
+        "body": "res <- http.get(${1:\"https://example.com\"})",
+        "description": "HTTP GET request"
+    },
+    "HTTP Server": {
+        "prefix": "httpserver",
+        "body": [
+            "import http_server",
+            "",
+            "act handler(req) {",
+            "    if req[\"path\"] == \"/health\" { -> {\"status\": 200, \"body\": \"ok\"} }",
+            "    -> {\"status\": 404, \"body\": \"not found\"}",
+            "}",
+            "",
+            "http_server.serve(\"127.0.0.1\", 18082, handler)"
+        ],
+        "description": "Minimal HTTP server"
     }
 }

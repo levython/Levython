@@ -2,7 +2,7 @@
 
 ## Quick Install
 
-1. **Download** the latest release: `levython-1.0.1-windows-installer.zip`
+1. **Download** the latest release: `levython-1.0.2-windows-installer.zip`
 2. **Extract** the ZIP file
 3. **Run** `Install-Levython.bat` as Administrator
 4. Follow the GUI installer
@@ -50,6 +50,10 @@ build-complete-installer.bat --inno
   - Visual Studio with C++ workload
   - Clang
 
+- **OpenSSL Dev Libraries**:
+  - Required for HTTP + crypto modules (libssl/libcrypto)
+  - Set `OPENSSL_DIR` or install via vcpkg/MSYS2/OpenSSL installer
+
 - **Optional**:
   - [Inno Setup 6](https://jrsoftware.org/isinfo.php) for professional installer
 
@@ -71,7 +75,7 @@ powershell -ExecutionPolicy Bypass -File LevythonInstaller.ps1 -Silent -InstallP
 ## Files Included
 
 ```
-levython-1.0.1-windows-installer.zip
+levython-1.0.2-windows-installer.zip
 ├── levython.exe           # Main executable
 ├── Install-Levython.bat   # GUI installer launcher
 ├── LevythonInstaller.ps1  # PowerShell installer
@@ -96,7 +100,7 @@ After installation, open a new terminal and run:
 
 ```bash
 levython --version
-# Output: Levython 1.0.1 - High Performance Programming
+# Output: Levython 1.0.2 - High Performance Programming
 
 levython examples\01_hello_world.levy
 # Output: Hello, World!

@@ -1,0 +1,179 @@
+# ============================================================================
+# LEVYTHON OS MODULE EXAMPLE
+# ============================================================================
+# This example demonstrates the OS module for system operations.
+# Run with: ./levython examples/os_module.levy
+# ============================================================================
+
+import os
+
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON OS MODULE EXAMPLE                                 ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")
+
+# -----------------------------------------------------------------------------
+# System Information
+# -----------------------------------------------------------------------------
+say("")
+say("🖥️  [Demo 1] System Information")
+say("   ────────────────────────────────────────────────────────────")
+
+say("   OS Name: " + os.name())
+say("   Path Separator: " + os.sep())
+say("   Current Directory: " + os.cwd())
+say("   Absolute Path of '.': " + os.abspath("."))
+
+# -----------------------------------------------------------------------------
+# Environment Variables
+# -----------------------------------------------------------------------------
+say("")
+say("🔧 [Demo 2] Environment Variables")
+say("   ────────────────────────────────────────────────────────────")
+
+# Get common environment variables with fallbacks
+username <- os.getenv("USER", os.getenv("USERNAME", "unknown"))
+home <- os.getenv("HOME", os.getenv("USERPROFILE", "unknown"))
+shell <- os.getenv("SHELL", os.getenv("ComSpec", "unknown"))
+
+say("   Username: " + username)
+say("   Home Directory: " + home)
+say("   Shell: " + shell)
+
+# Set and get environment variable
+os.setenv("LEVYTHON_DEMO", "Hello from Levython!")
+say("   Custom Env Var: " + os.getenv("LEVYTHON_DEMO", "not set"))
+os.unsetenv("LEVYTHON_DEMO")
+
+# -----------------------------------------------------------------------------
+# Directory Operations
+# -----------------------------------------------------------------------------
+say("")
+say("📁 [Demo 3] Directory Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+demo_dir <- "levython_demo_dir"
+
+# Create directory
+say("   Creating directory: " + demo_dir)
+if not os.exists(demo_dir) {
+    if os.mkdir(demo_dir) {
+        say("   ✅ Directory created successfully!")
+    } else {
+        say("   ❌ Failed to create directory")
+    }
+} else {
+    say("   ⚠️  Directory already exists")
+}
+
+# Check directory properties
+say("   Directory exists: " + str(os.exists(demo_dir)))
+say("   Is directory: " + str(os.is_dir(demo_dir)))
+say("   Is file: " + str(os.is_file(demo_dir)))
+
+# -----------------------------------------------------------------------------
+# File Operations
+# -----------------------------------------------------------------------------
+say("")
+say("📄 [Demo 4] File Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+file_path <- demo_dir + os.sep() + "example.txt"
+
+# Write a file
+say("   Writing file: " + file_path)
+write_file(file_path, "Hello from Levython OS module!\nThis is line 2.\nAnd line 3.")
+say("   ✅ File written successfully!")
+
+# Check file properties
+say("   File exists: " + str(os.exists(file_path)))
+say("   Is file: " + str(os.is_file(file_path)))
+say("   Absolute path: " + os.abspath(file_path))
+
+# Read file content
+say("   Content: " + read_file(file_path))
+
+# -----------------------------------------------------------------------------
+# Directory Listing
+# -----------------------------------------------------------------------------
+say("")
+say("📋 [Demo 5] Directory Listing")
+say("   ────────────────────────────────────────────────────────────")
+
+# Create a few more files
+write_file(demo_dir + os.sep() + "file1.txt", "File 1 content")
+write_file(demo_dir + os.sep() + "file2.txt", "File 2 content")
+write_file(demo_dir + os.sep() + "data.json", "{\"key\": \"value\"}")
+
+entries <- os.listdir(demo_dir)
+say("   Files in " + demo_dir + ":")
+for entry in entries {
+    say("     → " + entry)
+}
+
+# -----------------------------------------------------------------------------
+# Rename & Move
+# -----------------------------------------------------------------------------
+say("")
+say("🔄 [Demo 6] Rename Operations")
+say("   ────────────────────────────────────────────────────────────")
+
+old_path <- demo_dir + os.sep() + "example.txt"
+new_path <- demo_dir + os.sep() + "renamed_example.txt"
+
+say("   Renaming: example.txt → renamed_example.txt")
+if os.rename(old_path, new_path) {
+    say("   ✅ Rename successful!")
+    say("   New file exists: " + str(os.exists(new_path)))
+} else {
+    say("   ❌ Rename failed")
+}
+
+# -----------------------------------------------------------------------------
+# Cleanup
+# -----------------------------------------------------------------------------
+say("")
+say("🧹 [Demo 7] Cleanup")
+say("   ────────────────────────────────────────────────────────────")
+
+# Remove all files
+say("   Removing files...")
+os.remove(demo_dir + os.sep() + "renamed_example.txt")
+os.remove(demo_dir + os.sep() + "file1.txt")
+os.remove(demo_dir + os.sep() + "file2.txt")
+os.remove(demo_dir + os.sep() + "data.json")
+
+# Remove directory
+say("   Removing directory...")
+if os.rmdir(demo_dir) {
+    say("   ✅ Cleanup complete!")
+} else {
+    say("   ❌ Cleanup failed")
+}
+
+say("   Directory exists: " + str(os.exists(demo_dir)))
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+say("")
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║  ✅ OS MODULE DEMO COMPLETE                                          ║")
+say("╠══════════════════════════════════════════════════════════════════════╣")
+say("║  Available OS Functions:                                             ║")
+say("║    • os.name()             - Get OS name                             ║")
+say("║    • os.sep()              - Get path separator                      ║")
+say("║    • os.cwd()              - Get current directory                   ║")
+say("║    • os.chdir(path)        - Change directory                        ║")
+say("║    • os.exists(path)       - Check if path exists                    ║")
+say("║    • os.is_file(path)      - Check if path is a file                 ║")
+say("║    • os.is_dir(path)       - Check if path is a directory            ║")
+say("║    • os.mkdir(path)        - Create directory                        ║")
+say("║    • os.rmdir(path)        - Remove directory                        ║")
+say("║    • os.remove(path)       - Remove file                             ║")
+say("║    • os.rename(old, new)   - Rename/move file                        ║")
+say("║    • os.listdir(path)      - List directory contents                 ║")
+say("║    • os.abspath(path)      - Get absolute path                       ║")
+say("║    • os.getenv(key, def?)  - Get environment variable                ║")
+say("║    • os.setenv(key, val)   - Set environment variable                ║")
+say("║    • os.unsetenv(key)      - Unset environment variable              ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")

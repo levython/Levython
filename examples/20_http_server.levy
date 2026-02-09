@@ -1,0 +1,228 @@
+# ============================================================================
+# LEVYTHON HTTP SERVER EXAMPLE
+# ============================================================================
+# This example demonstrates how to create a basic HTTP server in Levython.
+# Run with: ./levython examples/http_server.levy
+# Then visit: http://localhost:8080
+# ============================================================================
+
+import net
+import url
+import datetime
+import json
+
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON HTTP SERVER EXAMPLE                               ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")
+
+# -----------------------------------------------------------------------------
+# Helper Functions
+# -----------------------------------------------------------------------------
+
+act _has_key(m, k) {
+    ok <- "no"
+    try { x <- m[k]; ok <- "yes" } catch { }
+    -> ok == "yes"
+}
+
+act _parse_query(qs) {
+    out <- {}
+    if qs == "" { -> out }
+    parts <- split(qs, "&")
+    i <- 0
+    while i < len(parts) {
+        p <- parts[i]
+        i <- i + 1
+        kv <- split(p, "=")
+        if len(kv) == 1 {
+            out[url.decode(kv[0])] <- ""
+        } else {
+            out[url.decode(kv[0])] <- url.decode(kv[1])
+        }
+    }
+    -> out
+}
+
+act _parse_request(raw) {
+    parts <- split(raw, "\n\n")
+    head <- parts[0]
+    body <- ""
+    if len(parts) > 1 { body <- parts[1] }
+
+    lines <- split(head, "\n")
+    reqline <- trim(lines[0])
+    reqparts <- split(reqline, " ")
+    m <- reqparts[0]
+    p <- reqparts[1]
+    v <- reqparts[2]
+
+    path <- p
+    query <- ""
+    pq <- split(p, "?")
+    if len(pq) >= 2 {
+        path <- pq[0]
+        query <- pq[1]
+    }
+
+    headers <- {}
+    i <- 1
+    while i < len(lines) {
+        line <- trim(lines[i])
+        i <- i + 1
+        if line == "" { break }
+        kv <- split(line, ":")
+        if len(kv) >= 2 {
+            key <- trim(kv[0])
+            val <- trim(kv[1])
+            headers[key] <- val
+        }
+    }
+
+    -> {"method": m, "path": path, "raw_path": p, "query": _parse_query(query), "version": v, "headers": headers, "body": body}
+}
+
+act _http_response(status, body, headers) {
+    status_text <- "OK"
+    if status == 404 { status_text <- "Not Found" }
+    if status == 500 { status_text <- "Internal Server Error" }
+    ctype <- "text/plain"
+    if _has_key(headers, "Content-Type") { ctype <- headers["Content-Type"] }
+
+    out <- "HTTP/1.1 " + str(status) + " " + status_text + "\n"
+    out <- out + "Content-Type: " + ctype + "\n"
+    out <- out + "Content-Length: " + str(len(body)) + "\n"
+    out <- out + "Connection: close\n"
+    out <- out + "\n" + body
+    -> out
+}
+
+# -----------------------------------------------------------------------------
+# Request Handler - Define your routes here
+# -----------------------------------------------------------------------------
+
+act handle_request(req) {
+    method <- req["method"]
+    path <- req["path"]
+    query <- req["query"]
+    
+    # Route: Home page
+    if path == "/" {
+        html <- "<!DOCTYPE html>
+<html>
+<head>
+    <title>Levython Server</title>
+    <style>
+        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }
+        h1 { color: #667eea; }
+        .route { background: #f5f5f5; padding: 10px; margin: 10px 0; border-radius: 5px; }
+        code { background: #e0e0e0; padding: 2px 6px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>🚀 Welcome to Levython HTTP Server!</h1>
+    <p>This server is running on <strong>Levython</strong>.</p>
+    <h2>Available Routes:</h2>
+    <div class='route'><code>GET /</code> - This home page</div>
+    <div class='route'><code>GET /hello</code> - Simple hello message</div>
+    <div class='route'><code>GET /health</code> - Health check endpoint</div>
+    <div class='route'><code>GET /time</code> - Current server time</div>
+    <div class='route'><code>GET /echo?msg=your_message</code> - Echo your message</div>
+    <div class='route'><code>POST /json</code> - Echo JSON data</div>
+</body>
+</html>"
+        -> {"status": 200, "body": html, "headers": {"Content-Type": "text/html"}}
+    }
+    
+    # Route: Hello
+    if path == "/hello" {
+        -> {"status": 200, "body": "Hello from Levython! 👋", "headers": {"Content-Type": "text/plain"}}
+    }
+    
+    # Route: Health check
+    if path == "/health" {
+        health_data <- json.stringify({"status": "healthy", "server": "levython", "version": "1.0"})
+        -> {"status": 200, "body": health_data, "headers": {"Content-Type": "application/json"}}
+    }
+    
+    # Route: Current time
+    if path == "/time" {
+        now <- datetime.now_utc()
+        time_data <- json.stringify({"epoch_ms": now["epoch_ms"], "message": "Current server time"})
+        -> {"status": 200, "body": time_data, "headers": {"Content-Type": "application/json"}}
+    }
+    
+    # Route: Echo query parameter
+    if path == "/echo" {
+        msg <- "No message provided"
+        if _has_key(query, "msg") {
+            msg <- query["msg"]
+        }
+        echo_data <- json.stringify({"echo": msg, "method": method})
+        -> {"status": 200, "body": echo_data, "headers": {"Content-Type": "application/json"}}
+    }
+    
+    # Route: JSON POST endpoint
+    if path == "/json" and method == "POST" {
+        body <- req["body"]
+        response_data <- json.stringify({"received": body, "status": "ok"})
+        -> {"status": 200, "body": response_data, "headers": {"Content-Type": "application/json"}}
+    }
+    
+    # 404 - Not Found
+    -> {"status": 404, "body": "404 - Not Found", "headers": {"Content-Type": "text/plain"}}
+}
+
+# -----------------------------------------------------------------------------
+# Main Server Loop
+# -----------------------------------------------------------------------------
+
+host <- "127.0.0.1"
+port <- 8080
+
+say("")
+say("🌐 Starting HTTP Server...")
+say("   Host: " + host)
+say("   Port: " + str(port))
+say("   URL: http://" + host + ":" + str(port))
+say("")
+say("   Press Ctrl+C to stop the server")
+say("───────────────────────────────────────────────────────────────────────")
+
+listener <- net.tcp_listen(host, port, 128)
+
+while yes {
+    conn <- net.tcp_accept(listener)
+    if conn["socket"] == 0 { continue }
+    sock <- conn["socket"]
+
+    data <- ""
+    net.set_nonblocking(sock, yes)
+    tries <- 0
+    while not contains(data, "\n\n") and tries < 400 {
+        part <- net.tcp_try_recv(sock, 4096)
+        if part["ok"] == yes {
+            data <- data + part["data"]
+        } else {
+            if part["closed"] == yes { break }
+            datetime.sleep_ms(5)
+            tries <- tries + 1
+        }
+    }
+
+    if data == "" {
+        net.tcp_close(sock)
+        continue
+    }
+
+    req <- _parse_request(data)
+    say("📨 " + req["method"] + " " + req["path"])
+
+    result <- handle_request(req)
+    resp_status <- result["status"]
+    resp_body <- result["body"]
+    resp_headers <- result["headers"]
+
+    resp <- _http_response(resp_status, resp_body, resp_headers)
+    net.tcp_send(sock, resp)
+    net.tcp_close(sock)
+}

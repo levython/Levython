@@ -1,0 +1,41 @@
+import net
+import thread
+import json
+import process
+
+host <- "127.0.0.1"
+port <- int(process.getenv("LEVYTHON_CHAT_PORT", "19110"))
+
+sock <- net.tcp_connect(host, port)
+net.set_nonblocking(sock, yes)
+
+message <- json.stringify({"user": "tester", "text": "hello-from-client"})
+send_ok <- no
+send_tries <- 0
+while send_ok == no and send_tries < 200 {
+    s <- net.tcp_try_send(sock, message)
+    if s["ok"] {
+        send_ok <- yes
+    } else {
+        thread.sleep(5)
+        send_tries <- send_tries + 1
+    }
+}
+
+response <- ""
+tries <- 0
+while tries < 400 {
+    pkt <- net.tcp_try_recv(sock, 4096)
+    if pkt["ok"] {
+        response <- pkt["data"]
+        tries <- 400
+    } else {
+        thread.sleep(5)
+        tries <- tries + 1
+    }
+}
+
+say(response)
+_ <- net.tcp_try_send(sock, "/quit")
+thread.sleep(30)
+net.tcp_close(sock)

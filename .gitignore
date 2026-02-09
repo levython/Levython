@@ -5,6 +5,8 @@ lpm
 *.out
 *.exe
 
+#releases
+releases/
 # macOS
 .DS_Store
 *.dSYM/

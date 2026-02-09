@@ -1,0 +1,133 @@
+# ============================================================================
+# LEVYTHON HTTP CLIENT EXAMPLE
+# ============================================================================
+# This example demonstrates the HTTP module for making web requests.
+# Run with: ./levython examples/http_client.levy
+# ============================================================================
+
+import http
+
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON HTTP CLIENT EXAMPLE                               ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")
+
+# -----------------------------------------------------------------------------
+# HTTP GET Request
+# -----------------------------------------------------------------------------
+say("")
+say("🌐 [Demo 1] Simple HTTP GET Request")
+say("   URL: http://httpbin.org/get")
+say("   ────────────────────────────────────────────────────────────")
+
+response <- http.get("http://httpbin.org/get")
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+say("   Elapsed: " + str(response["elapsed_ms"]) + "ms")
+
+# -----------------------------------------------------------------------------
+# HTTP POST Request with JSON Body
+# -----------------------------------------------------------------------------
+say("")
+say("📤 [Demo 2] HTTP POST Request with JSON")
+say("   URL: http://httpbin.org/post")
+say("   ────────────────────────────────────────────────────────────")
+
+headers <- {"Content-Type": "application/json"}
+body <- "{\"name\": \"Levython\", \"version\": \"1.0\", \"language\": \"awesome\"}"
+
+response <- http.post("http://httpbin.org/post", body, headers)
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+say("   Elapsed: " + str(response["elapsed_ms"]) + "ms")
+
+# -----------------------------------------------------------------------------
+# HTTPS Request (Secure)
+# -----------------------------------------------------------------------------
+say("")
+say("🔒 [Demo 3] HTTPS Secure Request")
+say("   URL: https://httpbin.org/get")
+say("   ────────────────────────────────────────────────────────────")
+
+response <- http.get("https://httpbin.org/get")
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+say("   Secure connection successful!")
+
+# -----------------------------------------------------------------------------
+# Custom Headers
+# -----------------------------------------------------------------------------
+say("")
+say("📋 [Demo 4] Request with Custom Headers")
+say("   URL: http://httpbin.org/headers")
+say("   ────────────────────────────────────────────────────────────")
+
+custom_headers <- {
+    "X-Custom-Header": "Levython-Demo",
+    "User-Agent": "Levython/1.0",
+    "Accept": "application/json"
+}
+response <- http.get("http://httpbin.org/headers", custom_headers)
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+
+# -----------------------------------------------------------------------------
+# HTTP Status Codes
+# -----------------------------------------------------------------------------
+say("")
+say("📊 [Demo 5] HTTP Status Codes")
+say("   ────────────────────────────────────────────────────────────")
+
+say("   Testing 200 OK...")
+response <- http.get("http://httpbin.org/status/200")
+say("   → Status: " + str(response["status"]) + " | OK: " + str(response["ok"]))
+
+say("")
+say("   Testing 404 Not Found...")
+response <- http.get("http://httpbin.org/status/404")
+say("   → Status: " + str(response["status"]) + " | OK: " + str(response["ok"]))
+
+say("")
+say("   Testing 500 Server Error...")
+response <- http.get("http://httpbin.org/status/500")
+say("   → Status: " + str(response["status"]) + " | OK: " + str(response["ok"]))
+
+# -----------------------------------------------------------------------------
+# HTTP PUT Request
+# -----------------------------------------------------------------------------
+say("")
+say("📝 [Demo 6] HTTP PUT Request")
+say("   URL: http://httpbin.org/put")
+say("   ────────────────────────────────────────────────────────────")
+
+put_body <- "{\"update\": \"data\", \"id\": 42}"
+response <- http.put("http://httpbin.org/put", put_body, {"Content-Type": "application/json"})
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+
+# -----------------------------------------------------------------------------
+# HTTP DELETE Request
+# -----------------------------------------------------------------------------
+say("")
+say("🗑️  [Demo 7] HTTP DELETE Request")
+say("   URL: http://httpbin.org/delete")
+say("   ────────────────────────────────────────────────────────────")
+
+response <- http.delete("http://httpbin.org/delete")
+say("   Status: " + str(response["status"]))
+say("   OK: " + str(response["ok"]))
+
+# -----------------------------------------------------------------------------
+# Summary
+# -----------------------------------------------------------------------------
+say("")
+say("╔══════════════════════════════════════════════════════════════════════╗")
+say("║  ✅ HTTP CLIENT DEMO COMPLETE                                        ║")
+say("╠══════════════════════════════════════════════════════════════════════╣")
+say("║  Available HTTP Methods:                                             ║")
+say("║    • http.get(url, headers?)       - GET request                     ║")
+say("║    • http.post(url, body, headers) - POST request                    ║")
+say("║    • http.put(url, body, headers)  - PUT request                     ║")
+say("║    • http.patch(url, body, headers)- PATCH request                   ║")
+say("║    • http.delete(url, headers?)    - DELETE request                  ║")
+say("║    • http.head(url, headers?)      - HEAD request                    ║")
+say("╚══════════════════════════════════════════════════════════════════════╝")

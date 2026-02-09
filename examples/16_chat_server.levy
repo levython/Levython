@@ -1,0 +1,65 @@
+import net
+import thread
+import json
+import process
+
+host <- "127.0.0.1"
+port <- int(process.getenv("LEVYTHON_CHAT_PORT", "19110"))
+
+listener <- net.tcp_listen(host, port, 16)
+net.set_nonblocking(listener, yes)
+
+say("CHAT_SERVER_READY")
+
+client <- 0
+ticks <- 0
+while client == 0 and ticks < 500 {
+    acc <- net.tcp_try_accept(listener)
+    if acc["ok"] {
+        client <- acc["socket"]
+        net.set_nonblocking(client, yes)
+        say("CHAT_CLIENT_CONNECTED " + acc["host"] + ":" + str(acc["port"]))
+    } else {
+        thread.sleep(10)
+    }
+    ticks <- ticks + 1
+}
+
+if client == 0 {
+    say("CHAT_SERVER_TIMEOUT")
+    net.tcp_close(listener)
+} else {
+    running <- yes
+    idle <- 0
+    while running and idle < 3000 {
+        pkt <- net.tcp_try_recv(client, 4096)
+        if pkt["ok"] {
+            idle <- 0
+            text <- pkt["data"]
+            if text == "/quit" {
+                send_res <- net.tcp_try_send(client, "bye")
+                if send_res["would_block"] {
+                    thread.sleep(1)
+                }
+                running <- no
+            } else {
+                payload <- json.stringify({"type": "message", "echo": text, "ok": yes})
+                send_res <- net.tcp_try_send(client, payload)
+                if send_res["would_block"] {
+                    thread.sleep(1)
+                }
+            }
+        } else {
+            if pkt["closed"] {
+                running <- no
+            } else {
+                thread.sleep(5)
+                idle <- idle + 1
+            }
+        }
+    }
+
+    net.tcp_close(client)
+    net.tcp_close(listener)
+    say("CHAT_SERVER_DONE")
+}

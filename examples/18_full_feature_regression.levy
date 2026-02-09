@@ -1,0 +1,112 @@
+# ============================================================================
+# Levython Full Feature Regression
+# Exercises core language features: arithmetic, strings, lists, dicts, loops,
+# functions, recursion, OOP, file I/O, OS helpers, and HTTP client.
+# Run with:
+#   ./levython examples/full_feature_regression.levy
+# ============================================================================
+
+import os
+import http
+
+say("=== Levython Full Feature Regression ===")
+
+# Basics ---------------------------------------------------------------------
+a <- 7
+b <- 3
+say("Arithmetic: a+b=" + str(a + b) + " a*b=" + str(a * b) + " a/b=" + str(a / b))
+say("Comparisons: a>b=" + str(a > b) + " a==b=" + str(a == b))
+
+# Functions and recursion ----------------------------------------------------
+act fib(n) {
+    if n <= 1 {
+        -> n
+    }
+    -> fib(n - 1) + fib(n - 2)
+}
+
+say("fib(10)=" + str(fib(10)))
+
+# Lists and dictionaries -----------------------------------------------------
+nums <- [1, 2, 3, 4]
+append(nums, 5)
+say("List length=" + str(len(nums)) + " first=" + str(nums[0]) + " last=" + str(nums[len(nums)-1]))
+
+profile <- {"name": "Levython", "version": "1.0.2", "status": "ok"}
+profile["version"] <- "1.0.2+regression"
+mutation_ok <- "no"
+if profile["version"] == "1.0.2+regression" {
+    mutation_ok <- "yes"
+}
+say("Dict: name=" + profile["name"] + " version=" + profile["version"] + " status=" + profile["status"] + " mutation=" + mutation_ok)
+
+# Loops ----------------------------------------------------------------------
+sum <- 0
+for n in nums {
+    sum <- sum + n
+}
+say("Loop sum=" + str(sum))
+
+count <- 3
+while count > 0 {
+    say("Countdown " + str(count))
+    count <- count - 1
+}
+
+# OOP ------------------------------------------------------------------------
+class Counter {
+    init(label) {
+        self.label <- label
+        self.value <- 0
+    }
+
+    act inc(delta) {
+        self.value <- self.value + delta
+        say(self.label + " -> " + str(self.value))
+    }
+
+    act reset() {
+        self.value <- 0
+        say(self.label + " reset")
+    }
+}
+
+c <- Counter("CounterA")
+c.inc(2)
+c.inc(5)
+c.reset()
+
+# File I/O -------------------------------------------------------------------
+filename <- "regression_tmp.txt"
+write_file(filename, "hello from levython regression\nline2")
+say("file_exists? " + str(file_exists(filename)))
+say("file contents:\n" + read_file(filename))
+
+# OS helpers -----------------------------------------------------------------
+say("cwd=" + os.cwd())
+tempdir <- "regression_tmp_dir"
+if not os.exists(tempdir) {
+    os.mkdir(tempdir)
+}
+path_old <- tempdir + "/old.txt"
+write_file(path_old, "temp data")
+path_new <- tempdir + "/new.txt"
+os.rename(path_old, path_new)
+say("renamed file present? " + str(os.is_file(path_new)))
+say("dir listing=" + str(os.listdir(tempdir)))
+
+# HTTP -----------------------------------------------------------------------
+say("HTTP GET https://httpbin.org/get")
+resp <- http.get("https://httpbin.org/get", {"User-Agent": "Levython-Regression"})
+say("status=" + str(resp["status"]) + " ok=" + str(resp["ok"]))
+
+say("HTTP POST https://httpbin.org/post")
+resp2 <- http.post("https://httpbin.org/post", "{\"ping\":\"pong\"}", {"Content-Type": "application/json"})
+say("status=" + str(resp2["status"]) + " ok=" + str(resp2["ok"]))
+
+say("=== Regression complete ===")
+
+# Cleanup (best-effort)
+os.remove(path_new)
+os.rmdir(tempdir)
+os.remove(filename)

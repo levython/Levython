@@ -1,0 +1,23 @@
+import input
+import datetime
+
+say("Press keys (q to quit).")
+ok <- input.enable_raw()
+if not ok {
+    say("input.enable_raw() failed (not a TTY).")
+}
+
+while yes {
+    r <- input.poll()
+    if r["ok"] == yes {
+        if r["special"] == yes {
+            say("special key code=" + str(r["code"]))
+        } else {
+            say("key=" + r["key"] + " code=" + str(r["code"]))
+            if r["key"] == "q" { break }
+        }
+    }
+    datetime.sleep_ms(10)
+}
+
+input.disable_raw()

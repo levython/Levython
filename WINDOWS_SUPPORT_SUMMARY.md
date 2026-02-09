@@ -112,7 +112,7 @@ Usage:
 build-installer.bat
 ```
 
-Output: `releases\levython-1.0.1-windows-installer.exe`
+Output: `releases\levython-1.0.2-windows-installer.exe`
 
 **Result**: ✅ **Easy build process for developers**
 
@@ -215,7 +215,7 @@ Changes:
 ## 📦 Deliverables
 
 ### For End Users
-1. **GUI Installer** (`levython-1.0.1-windows-installer.exe`)
+1. **GUI Installer** (`levython-1.0.2-windows-installer.exe`)
    - Single download, easy installation
    - Automatic configuration
    

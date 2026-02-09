@@ -1,0 +1,38 @@
+import async
+import net
+import process
+import thread
+
+host <- "127.0.0.1"
+port <- int(process.getenv("LEVYTHON_ASYNC_PORT", "19220"))
+
+listener <- net.tcp_listen(host, port, 16)
+net.set_nonblocking(listener, yes)
+
+say("ASYNC_ECHO_READY")
+
+client <- 0
+tries <- 0
+while client == 0 and tries < 800 {
+    acc <- net.tcp_try_accept(listener)
+    if acc["ok"] {
+        client <- acc["socket"]
+        net.set_nonblocking(client, yes)
+    } else {
+        thread.sleep(5)
+    }
+    tries <- tries + 1
+}
+
+if client == 0 {
+    say("ASYNC_ECHO_TIMEOUT")
+    net.tcp_close(listener)
+} else {
+    pkt <- await(async.tcp_recv(client, 2048), 5000)
+    if pkt["ok"] and pkt["data"] == "ping-async" {
+        _ <- await(async.tcp_send(client, "pong-async"), 5000)
+    }
+    net.tcp_close(client)
+    net.tcp_close(listener)
+    say("ASYNC_ECHO_DONE")
+}

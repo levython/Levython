@@ -24,7 +24,7 @@ $script:ProjectRoot = Split-Path -Parent $PSScriptRoot
 $script:BuildDir = Join-Path $script:ProjectRoot "build"
 $script:ReleaseDir = Join-Path $script:ProjectRoot "releases"
 $script:InstallerDir = $PSScriptRoot
-$script:Version = "1.0.1"
+$script:Version = "1.0.2"
 
 # Detect architecture
 if ($Architecture -eq "auto") {
@@ -78,10 +78,34 @@ function Find-Compiler {
     return $null
 }
 
+function Find-OpenSSL {
+    $candidates = @(
+        $env:OPENSSL_DIR,
+        "C:\OpenSSL-Win64",
+        "C:\OpenSSL-Win32",
+        "${env:ProgramFiles}\OpenSSL-Win64",
+        "${env:ProgramFiles(x86)}\OpenSSL-Win32",
+        "C:\vcpkg\installed\x64-windows",
+        "C:\vcpkg\installed\x86-windows"
+    ) | Where-Object { $_ -and (Test-Path $_) }
+
+    foreach ($base in $candidates) {
+        $inc = Join-Path $base "include"
+        $lib = Join-Path $base "lib"
+        if (Test-Path $inc -and Test-Path $lib) {
+            return @{ Include = $inc; Lib = $lib }
+        }
+    }
+    return $null
+}
+
 function Build-Executable {
     param([string]$OutputPath)
     
     $srcFile = Join-Path $script:ProjectRoot "src\levython.cpp"
+    $httpFile = Join-Path $script:ProjectRoot "src\http_client.cpp"
+    $srcFiles = @($srcFile)
+    if (Test-Path $httpFile) { $srcFiles += $httpFile }
     
     if (-not (Test-Path $srcFile)) {
         throw "Source file not found: $srcFile"
@@ -94,6 +118,11 @@ function Build-Executable {
     
     Write-Host "[INFO] Building Levython ($script:Arch)..." -ForegroundColor Yellow
     
+    $openssl = Find-OpenSSL
+    if (-not $openssl) {
+        throw "OpenSSL not found. Set OPENSSL_DIR or install OpenSSL (libssl/libcrypto)."
+    }
+
     switch ($compiler.Type) {
         "g++" {
             $archFlag = switch ($script:Arch) {
@@ -110,8 +139,14 @@ function Build-Executable {
                 "-static-libgcc",
                 "-static-libstdc++",
                 "-fexceptions",
+                "-I", $openssl.Include,
+                "-L", $openssl.Lib,
+                "-lssl",
+                "-lcrypto",
+                "-lws2_32",
+                "-lcrypt32",
                 "-o", $OutputPath,
-                $srcFile
+                $srcFiles
             )
             if ($archFlag) { $compileArgs = @($archFlag) + $compileArgs }
             
@@ -128,7 +163,8 @@ function Build-Executable {
                 "arm64" { "arm64" }
             }
             
-            $buildCmd = "call `"$vcvarsall`" $msvcArch`r`ncl.exe /std:c++17 /O2 /EHsc /DNDEBUG /Fe:`"$OutputPath`" `"$srcFile`""
+            $srcList = ($srcFiles | ForEach-Object { "`"$_`"" }) -join " "
+            $buildCmd = "call `"$vcvarsall`" $msvcArch`r`ncl.exe /std:c++17 /O2 /EHsc /DNDEBUG /I`"$($openssl.Include)`" /Fe:`"$OutputPath`" $srcList /link /LIBPATH:`"$($openssl.Lib)`" libssl.lib libcrypto.lib ws2_32.lib crypt32.lib"
             $buildScript = Join-Path $script:BuildDir "build_msvc.bat"
             Set-Content -Path $buildScript -Value $buildCmd
             
@@ -143,8 +179,14 @@ function Build-Executable {
                 "-DNDEBUG",
                 "-static",
                 "-fexceptions",
+                "-I", $openssl.Include,
+                "-L", $openssl.Lib,
+                "-lssl",
+                "-lcrypto",
+                "-lws2_32",
+                "-lcrypt32",
                 "-o", $OutputPath,
-                $srcFile
+                $srcFiles
             )
             
             Write-Host "    clang++ $($compileArgs -join ' ')" -ForegroundColor DarkGray

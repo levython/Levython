@@ -7,7 +7,7 @@ Get started with Levython on Windows in 5 minutes!
 ### Option A: GUI Installer (Recommended) ⭐
 
 1. **Download** the installer:
-   - [levython-1.0.1-windows-installer.exe](https://github.com/levython/Levython/releases/latest)
+   - [levython-1.0.2-windows-installer.exe](https://github.com/levython/Levython/releases/latest)
 
 2. **Run** the installer (right-click → Run as administrator)
 

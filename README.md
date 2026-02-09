@@ -1,76 +1,77 @@
-# 🚀 Levython 1.0
+# Levython 1.0.2
 
-**A high-performance programming language with x86-64 JIT compilation that beats C!**
+Levython is a high‑performance, general‑purpose programming language with an x86‑64 JIT, a fast bytecode VM, and a practical standard library.
+
+Motto: **Be better than yesterday**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-1.0.1-blue.svg)](https://github.com/levython/Levython)
-[![Release](https://img.shields.io/badge/release-1%20Feb%202026-green.svg)](https://github.com/levython/Levython/releases)
+[![Version](https://img.shields.io/badge/version-1.0.2-blue.svg)](https://github.com/levython/Levython)
+[![Release](https://img.shields.io/badge/release-8%20Feb%202026-green.svg)](https://github.com/levython/Levython/releases)
 
-📖 **[Official Documentation](https://levython.github.io/documentation/)**
-
----
-
-## ⚡ Performance
-
-| Benchmark | Python | Java | Go | C (gcc -O3) | **Levython** |
-|-----------|--------|------|-----|-------------|--------------|
-| **fib(35)** | 2300ms | 62ms | 85ms | ~50ms | **~45ms** 🏆 |
-| **fib(40)** | ∞ | 630ms | 750ms | ~530ms | **~480ms** 🏆 |
-
-> **Yes, Levython beats C** on recursive benchmarks! Our JIT compiler generates optimized x86-64 native code.
+Documentation: https://levython.github.io/documentation/
 
 ---
 
-## 🔧 Quick Install
+## Contents
 
-### Windows 🪟
+- Overview
+- Installation (Windows / macOS / Linux)
+- Quick Start
+- Language Guide
+- Standard Library
+- HTTP Server (Userland)
+- Package Manager (LPM)
+- Build System
+- CLI Reference
+- Project Layout
+- Contributing
+- License
+
+---
+
+## Overview
+
+Levython focuses on fast execution and developer ergonomics:
+- JIT‑accelerated execution and a high‑performance VM
+- Clean syntax, functions, classes, inheritance, and exceptions
+- Batteries‑included standard library for real programs
+- Cross‑platform tooling: macOS, Linux, Windows
+
+---
+
+## Installation
+
+### Windows
 
 **Option 1: GUI Installer (Recommended)**
+- Download the installer: https://github.com/levython/Levython/releases/latest
+- Supports both 32‑bit and 64‑bit Windows
 
-Download and run the professional installer:
-- [Download Levython Installer](https://github.com/levython/Levython/releases/latest) - Supports both 32-bit and 64-bit Windows
+**Option 2: Pre‑built Binaries**
+- levython‑windows‑x64.exe
+- levython‑windows‑x86.exe
 
-Features:
-- ✅ Modern GUI installer (similar to Python)
-- ✅ Automatic PATH configuration
-- ✅ VS Code extension installation
-- ✅ File associations for .levy files
-- ✅ Start Menu shortcuts
+Manual PATH instructions: `WINDOWS_INSTALL.md`
 
-**Option 2: Pre-built Binaries**
-
-Download the executable for your architecture:
-- [levython-windows-x64.exe](https://github.com/levython/Levython/releases/latest) (64-bit)
-- [levython-windows-x86.exe](https://github.com/levython/Levython/releases/latest) (32-bit)
-
-Then add to PATH manually. See [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md) for detailed instructions.
-
-**Building from Source on Windows:**
+**Build from Source (Windows):**
 ```batch
-# Using build script (requires MinGW-w64 or MSVC)
 build-windows.bat
-
-# Build for both 32-bit and 64-bit
 build-windows.bat --arch=both
-
-# Create installer
 build-installer.bat
 ```
 
-📖 **Full Windows Guide**: [WINDOWS_INSTALL.md](WINDOWS_INSTALL.md)
+**Important (Windows Installer EXE):**
+- The **GUI installer EXE** is built from `installer/levython-setup.iss` (Inno Setup).
+- `Install-Levython.bat` / `LevythonInstaller.ps1` are for **local install from source** and do **not** produce the GUI EXE.
 
----
+### macOS & Linux
 
-### macOS & Linux 🍎🐧
-
-**One-Line Install (Recommended)**
-
+**One‑line install:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/levython/levython/main/install.sh | bash
 ```
 
-**Manual Install**
-
+**Manual install:**
 ```bash
 git clone https://github.com/levython/Levython.git
 cd levython
@@ -78,228 +79,233 @@ chmod +x install.sh
 ./install.sh
 ```
 
-### Advanced Installation Options
-
-```bash
-# Force reinstallation
-./install.sh --force
-
-# Skip PATH configuration
-./install.sh --no-path
-
-# Skip VS Code extension
-./install.sh --no-vscode
-
-# Use specific compiler
-./install.sh --compiler=clang++
-
-# Show all options
-./install.sh --help
-```
-
-The enhanced installer will:
-- ✅ **Auto-detect OS** (macOS, Linux, Windows WSL/MSYS2/Git Bash)
-- ✅ **Validate C++ compiler** with C++17 support testing
-- ✅ **Install dependencies** automatically if missing
-- ✅ **Compile with optimizations** (O3 → O2 → basic fallback)
-- ✅ **Configure PATH** for all shell types (bash, zsh, fish)
-- ✅ **Cross-platform Windows support** (WSL, MSYS2, MinGW, Git Bash)
-- ✅ **Professional error handling** with detailed troubleshooting
-
-After installation, restart your terminal or run:
-```bash
-source ~/.zshrc  # or ~/.bashrc for bash
-```
-
 ---
 
-## 🎯 Hello World
+## Quick Start
 
-Create `hello.levy` (or `hello.ly`):
-```levy
-say("Hello, World!")
-```
-
-Run it:
-```bash
-levython hello.levy
-# or
-levython hello.ly
-```
-
-Both `.levy` and `.ly` extensions are supported!
-
----
-
-## 🎨 VS Code Extension
-
-Get syntax highlighting and code snippets for VS Code!
-
-1. Copy the `vscode-levython` folder to `~/.vscode/extensions/`
-2. Restart VS Code
-3. Open any `.levy` or `.ly` file - enjoy syntax highlighting!
-
-Features:
-- ✨ Syntax highlighting for all keywords
-- 📝 Code snippets (type `act`, `for`, `if`, etc.)
-- 🎯 Bracket matching & auto-close
-- 📁 File icons for `.levy` and `.ly`
-
----
-
-## 📖 Language Basics
-
-### Variables (use `<-` for assignment)
 ```levy
 name <- "Levython"
-age <- 1
-pi <- 3.14159
-active <- true
 
-say("Name: " + name)
-say("Age: " + str(age))
+act greet(who) {
+    say("Hello, " + who)
+}
+
+greet(name)
 ```
 
-### Functions (use `act` keyword)
+Run:
+```bash
+levython hello.levy
+```
+
+---
+
+## Language Guide
+
+### Variables and Types
+
 ```levy
-act greet(name) {
-    say("Hello, " + name + "!")
-}
+name <- "Levython"
+count <- 3
+pi <- 3.14159
+active <- true
+nothing <- none
+```
 
-act add(a, b) {
-    -> a + b  # use -> to return
-}
+### Functions
 
-greet("World")
-result <- add(5, 3)
-say("5 + 3 = " + str(result))
+```levy
+act add(a, b) { -> a + b }
+result <- add(2, 3)
 ```
 
 ### Conditionals
-```levy
-x <- 10
 
-if x > 5 {
-    say("x is greater than 5")
+```levy
+if count > 2 {
+    say("big")
 } else {
-    say("x is 5 or less")
+    say("small")
 }
 ```
 
 ### Loops
+
 ```levy
-# For loop with range
-for i in range(1, 5) {
-    say("Count: " + str(i))
+for i in range(1, 4) {
+    say(str(i))
 }
 
-# For loop over list
-colors <- ["red", "green", "blue"]
-for color in colors {
-    say(color)
+items <- ["a", "b", "c"]
+for x in items {
+    say(x)
 }
 
-# While loop
-n <- 5
+n <- 3
 while n > 0 {
     say(str(n))
     n <- n - 1
 }
 ```
 
-### Lists
+### Lists and Maps
+
 ```levy
-numbers <- [1, 2, 3, 4, 5]
-append(numbers, 6)
-say("Length: " + str(len(numbers)))
-say("First: " + str(numbers[0]))
+nums <- [1, 2, 3]
+append(nums, 4)
+
+m <- {"a": 1, "b": 2}
+ks <- keys(m)
+```
+
+### Classes and Inheritance
+
+```levy
+class Counter {
+    init(label) { self.label <- label; self.value <- 0 }
+    inc() { self.value <- self.value + 1 }
+}
+
+class NamedCounter is a Counter {
+    init(label) { super.init(label) }
+}
+
+c <- Counter("hits")
+c.inc()
+```
+
+### Exceptions
+
+```levy
+try {
+    x <- 1 / 0
+} catch {
+    say("failed")
+}
 ```
 
 ---
 
-## 📦 Package Manager (LPM)
+## Standard Library
 
-Levython includes a **native C++ package manager** - no Python required!
+### Core Builtins
+
+- `say`, `ask`, `print`, `println`
+- `len`, `range`, `append`, `keys`
+- `str`, `int`, `float`, `type`
+- `min`, `max`, `sum`, `sorted`, `reversed`
+- `upper`, `lower`, `trim`, `replace`, `split`, `join`, `contains`, `find`, `startswith`, `endswith`
+- `time`, `sqrt`, `pow`, `floor`, `ceil`, `round`
+
+### Modules
+
+#### `http`
+- `get`, `post`, `put`, `patch`, `delete`, `head`, `request`
+- `set_timeout`, `set_verify_ssl`
+
+#### `os`
+- `name`, `sep`, `cwd`, `chdir`, `listdir`, `exists`, `is_file`, `is_dir`
+- `mkdir`, `remove`, `rmdir`, `rename`, `abspath`, `getenv`, `setenv`, `unsetenv`
+
+#### `fs`
+- `exists`, `is_file`, `is_dir`, `mkdir`, `remove`, `rmdir`, `listdir`
+- `read_text`, `write_text`, `append_text`, `copy`, `move`, `abspath`
+
+#### `path`
+- `join`, `basename`, `dirname`, `ext`, `stem`, `norm`, `abspath`
+- `exists`, `is_file`, `is_dir`, `read_text`, `write_text`, `listdir`, `mkdir`, `remove`, `rmdir`
+
+#### `process`
+- `getpid`, `run`, `cwd`, `chdir`, `getenv`, `setenv`, `unsetenv`
+
+#### `json`
+- `parse`, `stringify`
+
+#### `url`
+- `parse`, `encode`, `decode`
+
+#### `net`
+- `tcp_connect`, `tcp_listen`, `tcp_accept`, `tcp_try_accept`
+- `tcp_send`, `tcp_try_send`, `tcp_recv`, `tcp_try_recv`, `tcp_close`
+- `udp_bind`, `udp_sendto`, `udp_recvfrom`, `udp_close`
+- `set_nonblocking`, `dns_lookup`
+
+#### `thread`
+- `spawn`, `join`, `is_done`, `sleep`
+
+#### `channel`
+- `create`, `send`, `recv`, `try_recv`, `close`
+
+#### `async`
+- `spawn`, `sleep`, `tcp_recv`, `tcp_send`, `tick`, `done`, `status`, `result`, `cancel`, `pending`, `await`
+
+#### `crypto`
+- `sha256`, `sha512`, `hmac_sha256`
+- `random_bytes`, `hex_encode`, `hex_decode`, `base64_encode`, `base64_decode`
+
+#### `datetime`
+- `now_utc`, `now_local`, `format`, `parse`, `sleep_ms`, `epoch_ms`
+
+#### `log`
+- `set_level`, `set_output`, `set_json`, `log`, `debug`, `info`, `warn`, `error`, `flush`
+
+#### `config`
+- `load_env`, `get`, `set`, `get_int`, `get_float`, `get_bool`, `has`
+
+#### `input`
+- `enable_raw`, `disable_raw`, `key_available`, `poll`, `read_key`
+
+---
+
+## HTTP Server (Userland)
+
+Use the included helper module: `http_server.levy`
+
+```levy
+import http_server
+
+act handler(req) {
+    if req["path"] == "/health" { -> {"status": 200, "body": "ok"} }
+    -> {"status": 404, "body": "not found"}
+}
+
+http_server.serve("127.0.0.1", 18082, handler)
+```
+
+---
+
+## Package Manager (LPM)
 
 ```bash
-# Search for packages
 levython lpm search ml
-
-# Install a package
 levython lpm install math
-
-# List installed packages
 levython lpm list
-
-# Remove a package
 levython lpm remove math
-
-# Or use the shortcut
-lpm install tensor
-lpm list
-```
-
-Available packages: `math`, `tensor`, `ml`, `random`, `test`, `string`, `json`, `http`, `csv`
-
----
-
-## 📚 Examples
-
-The `examples/` directory contains a progressive tutorial series:
-
-| File | Topic |
-|------|-------|
-| `01_hello_world.levy` | Basic output with `say()` |
-| `02_variables.levy` | Data types and assignment |
-| `03_arithmetic.levy` | Math operations |
-| `04_conditionals.levy` | If/else statements |
-| `05_loops.levy` | For and while loops |
-| `06_functions.levy` | Defining functions with `act` |
-| `07_lists.levy` | Working with lists |
-| `08_strings.levy` | String operations |
-| `09_fibonacci.levy` | Performance benchmark |
-| `10_file_io.levy` | File reading/writing |
-
-Run any example:
-```bash
-levython examples/01_hello_world.levy
 ```
 
 ---
 
-## 🔧 Advanced Features
+## Build System
 
-### Hardware & Memory Operations
-```levy
-ptr <- mem_alloc(1024)        # Allocate raw memory
-mem_write32(ptr, 0xDEADBEEF)  # Write 32-bit value
-value <- mem_read32(ptr)       # Read it back
-mem_free(ptr)                  # Free memory
+```
+levython build <input.levy|.ly> [options]
+  -o, --output <file>      Output executable path
+  --target <t>             native|windows|linux|macos|<target-triple>
+  --runtime <file>         Use prebuilt runtime binary instead of compiling
+  --source-root <dir>      Source root for cross-runtime compile (default: .)
+  --verbose                Print cross-compile command
 ```
 
-### Bitwise Operations
-```levy
-result <- bit_and(0xFF, 0x0F)  # Bitwise AND
-shifted <- shift_left(1, 4)    # Left shift
+Examples:
 ```
-
-### AI/ML Tensor Operations
-```levy
-weights <- tensor(784, 256)
-activation <- tensor_dot(inputs, weights)
-mean_val <- tensor_mean(activations)
-```
-
-### SIMD Vectorization
-```levy
-vec_a <- [1.0, 2.0, 3.0, 4.0]
-vec_b <- [4.0, 3.0, 2.0, 1.0]
-result <- simd_add_f32(vec_a, vec_b)
+levython build app.levy -o app
+levython build app.levy --target windows -o app.exe
+levython build app.levy --target aarch64-macos -o app-mac
 ```
 
 ---
 
-## 🛠️ Command Line Options
+## CLI Reference
 
 ```
 Usage: levython [options] <file.levy|.ly>
@@ -307,38 +313,22 @@ Usage: levython [options] <file.levy|.ly>
 Options:
   --help, -h       Show help message
   --version, -v    Show version
-  --legacy, -l     Use legacy interpreter
+  --no-update-check Disable update checks
   lpm <command>    Package manager
-
-LPM Commands:
-  levython lpm install <pkg>   Install package
-  levython lpm remove <pkg>    Remove package
-  levython lpm list            List installed
-  levython lpm search [query]  Search packages
+  build <src>      Build standalone executable
 ```
 
 ---
 
-## 📁 Project Structure
+## Project Layout
 
 ```
 levython/
-├── src/
-│   └── levython.cpp      # Complete implementation (~8500+ lines)
-│                         # - NaN-boxed bytecode VM
-│                         # - Advanced JIT optimization framework
-│                         # - Type specialization & inline caching
-│                         # - Hot loop detection & O(1) optimizations
-│                         # - Professional codebase (cleaned up)
-├── examples/             # Tutorial examples (01-10)
-├── vscode-levython/      # VS Code extension
-│   ├── syntaxes/         # Syntax highlighting
-│   ├── snippets/         # Code snippets
-│   └── package.json
-├── install.sh            # Enhanced cross-platform installer
-│                         # - C++17 compiler validation
-│                         # - Multi-environment Windows support
-│                         # - Comprehensive error handling
+├── src/                 # Core implementation
+├── examples/            # Example programs
+├── tests/               # Tests
+├── installer/           # Windows installer assets
+├── install.sh           # Cross-platform installer
 ├── README.md
 ├── CHANGELOG.md
 └── LICENSE
@@ -346,22 +336,15 @@ levython/
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! Areas of interest:
-- JIT optimizations
-- Additional builtin functions
-- VS Code extension improvements
-- Documentation
-
----
-
-## 📜 License
-
-MIT License - see [LICENSE](LICENSE) file.
+Contributions are welcome. Areas of interest:
+- JIT/VM optimizations
+- Standard library modules
+- Tooling and documentation
 
 ---
 
-**Levython 1.0.1 - Released 1 February 2026**
+## License
 
-Made with ❤️ by the Levython team
+MIT

@@ -14,7 +14,7 @@
 ; ==============================================================================
 
 #define MyAppName "Levython"
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #define MyAppPublisher "Levython Authors"
 #define MyAppURL "https://github.com/levython/levython"
 #define MyAppExeName "levython.exe"
@@ -43,6 +43,10 @@ OutputBaseFilename=levython-{#MyAppVersion}-windows-setup
 ; Modern UI
 WizardStyle=modern
 WizardSizePercent=120,120
+WizardResizable=yes
+DisableWelcomePage=no
+DisableReadyPage=no
+DisableFinishedPage=no
 
 ; Compression
 Compression=lzma2/ultra64
@@ -84,7 +88,7 @@ Name: "chinese"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Messages]
 WelcomeLabel1=Welcome to [name] Setup
-WelcomeLabel2=This will install [name/ver] on your computer.%n%n[name] is a high-performance JIT-compiled programming language with bytecode VM, featuring speeds faster than C for many operations.%n%nDetected Architecture: {code:GetArchDescription}
+WelcomeLabel2=This will install [name/ver] on your computer.%n%n[name] is a high‑performance programming language with a JIT‑accelerated runtime and a practical standard library.%n%nMotto: Be better than yesterday.%n%nDetected Architecture: {code:GetArchDescription}
 
 [CustomMessages]
 english.ArchX64=64-bit (x64)
@@ -279,8 +283,9 @@ begin
     ArchStr := GetArchDescription('');
     WizardForm.WelcomeLabel2.Caption := 
       'This will install Levython ' + '{#MyAppVersion}' + ' on your computer.' + #13#10 + #13#10 +
-      'Levython is a high-performance JIT-compiled programming language ' +
-      'with bytecode VM, featuring speeds faster than C for many operations.' + #13#10 + #13#10 +
+      'Levython is a high‑performance programming language with a JIT‑accelerated runtime ' +
+      'and a practical standard library.' + #13#10 + #13#10 +
+      'Motto: Be better than yesterday.' + #13#10 + #13#10 +
       'Detected Architecture: ' + ArchStr;
   end;
   
@@ -288,12 +293,14 @@ begin
   if CurPageID = wpFinished then
   begin
     WizardForm.FinishedLabel.Caption := 
-      'Levython has been successfully installed!' + #13#10 + #13#10 +
-      'You can now run Levython from the command line:' + #13#10 +
+      'Levython has been successfully installed.' + #13#10 + #13#10 +
+      'Quick start:' + #13#10 +
       '  levython --version' + #13#10 +
-      '  levython yourfile.levy' + #13#10 + #13#10 +
-      'Check out the examples in: ' + ExpandConstant('{app}\examples') + #13#10 + #13#10 +
-      'Performance: fib(35) ~45ms, fib(40) ~480ms (faster than C)';
+      '  levython hello.levy' + #13#10 + #13#10 +
+      'Examples folder:' + #13#10 +
+      '  ' + ExpandConstant('{app}\examples') + #13#10 + #13#10 +
+      'Documentation:' + #13#10 +
+      '  https://levython.github.io/documentation/';
   end;
 end;
 
