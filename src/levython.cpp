@@ -69,6 +69,7 @@
 #include <utility>
 #include <cstdarg>
 #include <ctime>
+#include <clocale>
 #include <random>
 #include <unordered_map>
 #include <unordered_set>
@@ -92,6 +93,10 @@
 #include <sys/wait.h>
 #endif
 
+#ifndef _WIN32
+extern char **environ;
+#endif
+
 // HTTP Module
 #include "http_client.hpp"
 
@@ -101,9 +106,12 @@
     #include <windows.h>
     #include <winsock2.h>
     #include <ws2tcpip.h>
+    #include <tlhelp32.h>
+    #include <signal.h>
     #include <conio.h>
     #include <io.h>
     #include <fcntl.h>  // For file constants
+    #include <Lmcons.h>
     #include <sys/stat.h>
     #define fileno _fileno
     #define fstat _fstat64
@@ -128,6 +136,13 @@
     #include <sys/stat.h>  // For fstat
     #include <fcntl.h>     // For open()
     #include <unistd.h>    // For close()
+    #include <signal.h>
+    #include <sys/mount.h>
+    #include <pwd.h>
+    #include <grp.h>
+    #include <sys/statvfs.h>
+    #include <sys/resource.h>
+    #include <sys/utsname.h>
     #include <termios.h>
     #include <sys/select.h>
     #include <sys/socket.h>
@@ -135,26 +150,37 @@
     #include <netinet/in.h>
     #include <arpa/inet.h>
     #include <errno.h>
+#if __linux__
+    #include <sys/sysinfo.h>
+#elif __APPLE__
+    #include <sys/sysctl.h>
+    #include <mach/mach.h>
+    #include <mach/mach_host.h>
 #endif
 
-// Fix Windows macro conflicts with Levython language tokens
+#ifndef MAP_JIT
+    #define MAP_JIT 0
+#endif
+#endif
+
+// Fix macro conflicts with Levython language tokens
+#ifdef TRUE
+    #undef TRUE
+#endif
+#ifdef FALSE
+    #undef FALSE
+#endif
+#ifdef NONE
+    #undef NONE
+#endif
+#ifdef IN
+    #undef IN
+#endif
+#ifdef OUT
+    #undef OUT
+#endif
+// Fix stream operation conflicts (Windows)
 #ifdef _WIN32
-    #ifdef TRUE
-        #undef TRUE
-    #endif
-    #ifdef FALSE
-        #undef FALSE
-    #endif
-    #ifdef NONE
-        #undef NONE
-    #endif
-    #ifdef IN
-        #undef IN
-    #endif
-    #ifdef OUT
-        #undef OUT
-    #endif
-    // Fix stream operation conflicts
     #ifdef open
         #undef open
     #endif
@@ -2980,7 +3006,122 @@ Value builtin_os_abspath(const std::vector<Value> &args);
 Value builtin_os_getenv(const std::vector<Value> &args);
 Value builtin_os_setenv(const std::vector<Value> &args);
 Value builtin_os_unsetenv(const std::vector<Value> &args);
+Value builtin_os_shutdown(const std::vector<Value> &args);
+Value builtin_os_restart(const std::vector<Value> &args);
+Value builtin_os_logout(const std::vector<Value> &args);
+Value builtin_os_lock(const std::vector<Value> &args);
+Value builtin_os_sleep(const std::vector<Value> &args);
+Value builtin_os_hibernate(const std::vector<Value> &args);
+Value builtin_os_hostname(const std::vector<Value> &args);
+Value builtin_os_set_hostname(const std::vector<Value> &args);
+Value builtin_os_uptime(const std::vector<Value> &args);
+Value builtin_os_cpu_count(const std::vector<Value> &args);
+Value builtin_os_mem_total(const std::vector<Value> &args);
+Value builtin_os_mem_free(const std::vector<Value> &args);
+Value builtin_os_platform(const std::vector<Value> &args);
+Value builtin_os_chmod(const std::vector<Value> &args);
+Value builtin_os_chown(const std::vector<Value> &args);
+Value builtin_os_stat(const std::vector<Value> &args);
+Value builtin_os_realpath(const std::vector<Value> &args);
+Value builtin_os_symlink(const std::vector<Value> &args);
+Value builtin_os_readlink(const std::vector<Value> &args);
+Value builtin_os_copy(const std::vector<Value> &args);
+Value builtin_os_move(const std::vector<Value> &args);
+Value builtin_os_getpid(const std::vector<Value> &args);
+Value builtin_os_exec(const std::vector<Value> &args);
+Value builtin_os_spawn(const std::vector<Value> &args);
+Value builtin_os_kill(const std::vector<Value> &args);
+Value builtin_os_user(const std::vector<Value> &args);
+Value builtin_os_uid(const std::vector<Value> &args);
+Value builtin_os_gid(const std::vector<Value> &args);
+Value builtin_os_is_admin(const std::vector<Value> &args);
+Value builtin_os_elevate(const std::vector<Value> &args);
+Value builtin_os_sleep_ms(const std::vector<Value> &args);
+Value builtin_os_env(const std::vector<Value> &args);
+Value builtin_os_path_sep(const std::vector<Value> &args);
+Value builtin_os_expanduser(const std::vector<Value> &args);
+Value builtin_os_expandvars(const std::vector<Value> &args);
+Value builtin_os_path_expand(const std::vector<Value> &args);
+Value builtin_os_homedir(const std::vector<Value> &args);
+Value builtin_os_username(const std::vector<Value> &args);
+Value builtin_os_groups(const std::vector<Value> &args);
+Value builtin_os_ppid(const std::vector<Value> &args);
+Value builtin_os_argv(const std::vector<Value> &args);
+Value builtin_os_exit(const std::vector<Value> &args);
+Value builtin_os_which(const std::vector<Value> &args);
+Value builtin_os_tempdir(const std::vector<Value> &args);
+Value builtin_os_getenvs(const std::vector<Value> &args);
+Value builtin_os_env_list(const std::vector<Value> &args);
+Value builtin_os_access(const std::vector<Value> &args);
+Value builtin_os_umask(const std::vector<Value> &args);
+Value builtin_os_env_update(const std::vector<Value> &args);
+Value builtin_os_getenv_int(const std::vector<Value> &args);
+Value builtin_os_getenv_float(const std::vector<Value> &args);
+Value builtin_os_getenv_bool(const std::vector<Value> &args);
+Value builtin_os_env_snapshot(const std::vector<Value> &args);
+Value builtin_os_env_diff(const std::vector<Value> &args);
+Value builtin_os_walk(const std::vector<Value> &args);
+Value builtin_os_glob(const std::vector<Value> &args);
+Value builtin_os_disk_usage(const std::vector<Value> &args);
+Value builtin_os_statvfs(const std::vector<Value> &args);
+Value builtin_os_touch(const std::vector<Value> &args);
+Value builtin_os_rmdir_rf(const std::vector<Value> &args);
+Value builtin_os_mkdir_p(const std::vector<Value> &args);
+Value builtin_os_ps(const std::vector<Value> &args);
+Value builtin_os_run(const std::vector<Value> &args);
+Value builtin_os_waitpid(const std::vector<Value> &args);
+Value builtin_os_kill_tree(const std::vector<Value> &args);
+Value builtin_os_run_capture(const std::vector<Value> &args);
+Value builtin_os_popen(const std::vector<Value> &args);
+Value builtin_os_spawn_io(const std::vector<Value> &args);
+Value builtin_os_scandir(const std::vector<Value> &args);
+Value builtin_os_link(const std::vector<Value> &args);
+Value builtin_os_renameat(const std::vector<Value> &args);
+Value builtin_os_lstat(const std::vector<Value> &args);
+Value builtin_os_fstat(const std::vector<Value> &args);
+Value builtin_os_open(const std::vector<Value> &args);
+Value builtin_os_read(const std::vector<Value> &args);
+Value builtin_os_write(const std::vector<Value> &args);
+Value builtin_os_fsync(const std::vector<Value> &args);
+Value builtin_os_close(const std::vector<Value> &args);
+Value builtin_os_fdopen(const std::vector<Value> &args);
+Value builtin_os_chdir_push(const std::vector<Value> &args);
+Value builtin_os_chdir_pop(const std::vector<Value> &args);
+Value builtin_os_signal(const std::vector<Value> &args);
+Value builtin_os_alarm(const std::vector<Value> &args);
+Value builtin_os_pause(const std::vector<Value> &args);
+Value builtin_os_killpg(const std::vector<Value> &args);
+Value builtin_os_setuid(const std::vector<Value> &args);
+Value builtin_os_setgid(const std::vector<Value> &args);
+Value builtin_os_getpgid(const std::vector<Value> &args);
+Value builtin_os_setpgid(const std::vector<Value> &args);
+Value builtin_os_setsid(const std::vector<Value> &args);
+Value builtin_os_nice(const std::vector<Value> &args);
+Value builtin_os_getpriority(const std::vector<Value> &args);
+Value builtin_os_setpriority(const std::vector<Value> &args);
+Value builtin_os_uid_name(const std::vector<Value> &args);
+Value builtin_os_gid_name(const std::vector<Value> &args);
+Value builtin_os_getpwnam(const std::vector<Value> &args);
+Value builtin_os_getgrnam(const std::vector<Value> &args);
+Value builtin_os_getlogin(const std::vector<Value> &args);
+Value builtin_os_getgroups(const std::vector<Value> &args);
+Value builtin_os_chflags(const std::vector<Value> &args);
+Value builtin_os_loadavg(const std::vector<Value> &args);
+Value builtin_os_cpu_info(const std::vector<Value> &args);
+Value builtin_os_os_release(const std::vector<Value> &args);
+Value builtin_os_boot_time(const std::vector<Value> &args);
+Value builtin_os_locale(const std::vector<Value> &args);
+Value builtin_os_timezone(const std::vector<Value> &args);
+Value builtin_os_mounts(const std::vector<Value> &args);
+Value builtin_os_service_control(const std::vector<Value> &args);
+Value builtin_os_service_query(const std::vector<Value> &args);
+Value builtin_os_battery_info(const std::vector<Value> &args);
+Value builtin_os_cgroups(const std::vector<Value> &args);
+Value builtin_os_namespaces(const std::vector<Value> &args);
+Value builtin_os_readlink_info(const std::vector<Value> &args);
+Value builtin_os_realpath_ex(const std::vector<Value> &args);
 Value create_os_module();
+void set_cli_args(int argc, char* argv[]);
 } // namespace os_bindings
 
 namespace fs_bindings {
@@ -3251,6 +3392,95 @@ class Interpreter {
         
         file->close();
         return Value();
+    }
+
+    Value builtin_fd_read(const std::vector<Value>& args, Value& this_obj) {
+        if (!this_obj.data.map.count("__fd__")) throw std::runtime_error("Invalid fd object");
+        const Value &fd_val = this_obj.data.map["__fd__"];
+        int fd = 0;
+        if (fd_val.type == ObjectType::INTEGER) fd = static_cast<int>(fd_val.data.integer);
+        else if (fd_val.type == ObjectType::FLOAT) fd = static_cast<int>(fd_val.data.floating);
+        else throw std::runtime_error("Invalid fd handle");
+        long want = -1;
+        if (!args.empty()) {
+            if (args[0].type == ObjectType::INTEGER) want = args[0].data.integer;
+            else if (args[0].type == ObjectType::FLOAT) want = static_cast<long>(args[0].data.floating);
+            else want = std::stol(args[0].to_string());
+        }
+        std::string out;
+        char buf[4096];
+#ifdef _WIN32
+        if (want < 0) {
+            while (true) {
+                int n = _read(fd, buf, sizeof(buf));
+                if (n <= 0) break;
+                out.append(buf, static_cast<size_t>(n));
+            }
+        } else {
+            long remaining = want;
+            while (remaining > 0) {
+                int chunk = remaining > static_cast<long>(sizeof(buf)) ? static_cast<int>(sizeof(buf)) : static_cast<int>(remaining);
+                int n = _read(fd, buf, chunk);
+                if (n <= 0) break;
+                out.append(buf, static_cast<size_t>(n));
+                remaining -= n;
+            }
+        }
+#else
+        if (want < 0) {
+            while (true) {
+                ssize_t n = read(fd, buf, sizeof(buf));
+                if (n <= 0) break;
+                out.append(buf, static_cast<size_t>(n));
+            }
+        } else {
+            long remaining = want;
+            while (remaining > 0) {
+                size_t chunk = remaining > static_cast<long>(sizeof(buf)) ? sizeof(buf) : static_cast<size_t>(remaining);
+                ssize_t n = read(fd, buf, chunk);
+                if (n <= 0) break;
+                out.append(buf, static_cast<size_t>(n));
+                remaining -= static_cast<long>(n);
+            }
+        }
+#endif
+        return Value(out);
+    }
+
+    Value builtin_fd_write(const std::vector<Value>& args, Value& this_obj) {
+        if (!this_obj.data.map.count("__fd__")) throw std::runtime_error("Invalid fd object");
+        if (args.size() != 1) throw std::runtime_error("write() expects 1 argument");
+        if (args[0].type != ObjectType::STRING) throw std::runtime_error("write() argument must be a string");
+        const Value &fd_val = this_obj.data.map["__fd__"];
+        int fd = 0;
+        if (fd_val.type == ObjectType::INTEGER) fd = static_cast<int>(fd_val.data.integer);
+        else if (fd_val.type == ObjectType::FLOAT) fd = static_cast<int>(fd_val.data.floating);
+        else throw std::runtime_error("Invalid fd handle");
+        const std::string &data = args[0].data.string;
+#ifdef _WIN32
+        int written = _write(fd, data.data(), static_cast<unsigned int>(data.size()));
+        if (written < 0) written = 0;
+        return Value(static_cast<long>(written));
+#else
+        ssize_t written = write(fd, data.data(), data.size());
+        if (written < 0) written = 0;
+        return Value(static_cast<long>(written));
+#endif
+    }
+
+    Value builtin_fd_close(const std::vector<Value>& args, Value& this_obj) {
+        if (!this_obj.data.map.count("__fd__")) throw std::runtime_error("Invalid fd object");
+        const Value &fd_val = this_obj.data.map["__fd__"];
+        int fd = 0;
+        if (fd_val.type == ObjectType::INTEGER) fd = static_cast<int>(fd_val.data.integer);
+        else if (fd_val.type == ObjectType::FLOAT) fd = static_cast<int>(fd_val.data.floating);
+        else throw std::runtime_error("Invalid fd handle");
+#ifdef _WIN32
+        _close(fd);
+#else
+        close(fd);
+#endif
+        return Value(true);
     }
     
     Value builtin_len(const std::vector<Value>& args) {
@@ -5207,6 +5437,9 @@ Value Interpreter::call_method(Value& instance,
         if (name == "file.read") return builtin_file_read(args, instance);
         if (name == "file.write") return builtin_file_write(args, instance);
         if (name == "file.close") return builtin_file_close(args, instance);
+        if (name == "fd.read") return builtin_fd_read(args, instance);
+        if (name == "fd.write") return builtin_fd_write(args, instance);
+        if (name == "fd.close") return builtin_fd_close(args, instance);
         if (name == "math.sin") return builtin_math_sin(args);
         if (name == "math.cos") return builtin_math_cos(args);
         if (name == "say") return builtin_say(args);
@@ -5309,6 +5542,120 @@ Value Interpreter::call_method(Value& instance,
         if (name == "os_getenv") return os_bindings::builtin_os_getenv(args);
         if (name == "os_setenv") return os_bindings::builtin_os_setenv(args);
         if (name == "os_unsetenv") return os_bindings::builtin_os_unsetenv(args);
+        if (name == "os_shutdown") return os_bindings::builtin_os_shutdown(args);
+        if (name == "os_restart") return os_bindings::builtin_os_restart(args);
+        if (name == "os_logout") return os_bindings::builtin_os_logout(args);
+        if (name == "os_lock") return os_bindings::builtin_os_lock(args);
+        if (name == "os_sleep") return os_bindings::builtin_os_sleep(args);
+        if (name == "os_hibernate") return os_bindings::builtin_os_hibernate(args);
+        if (name == "os_hostname") return os_bindings::builtin_os_hostname(args);
+        if (name == "os_set_hostname") return os_bindings::builtin_os_set_hostname(args);
+        if (name == "os_uptime") return os_bindings::builtin_os_uptime(args);
+        if (name == "os_cpu_count") return os_bindings::builtin_os_cpu_count(args);
+        if (name == "os_mem_total") return os_bindings::builtin_os_mem_total(args);
+        if (name == "os_mem_free") return os_bindings::builtin_os_mem_free(args);
+        if (name == "os_platform") return os_bindings::builtin_os_platform(args);
+        if (name == "os_chmod") return os_bindings::builtin_os_chmod(args);
+        if (name == "os_chown") return os_bindings::builtin_os_chown(args);
+        if (name == "os_stat") return os_bindings::builtin_os_stat(args);
+        if (name == "os_realpath") return os_bindings::builtin_os_realpath(args);
+        if (name == "os_symlink") return os_bindings::builtin_os_symlink(args);
+        if (name == "os_readlink") return os_bindings::builtin_os_readlink(args);
+        if (name == "os_copy") return os_bindings::builtin_os_copy(args);
+        if (name == "os_move") return os_bindings::builtin_os_move(args);
+        if (name == "os_getpid") return os_bindings::builtin_os_getpid(args);
+        if (name == "os_exec") return os_bindings::builtin_os_exec(args);
+        if (name == "os_spawn") return os_bindings::builtin_os_spawn(args);
+        if (name == "os_kill") return os_bindings::builtin_os_kill(args);
+        if (name == "os_user") return os_bindings::builtin_os_user(args);
+        if (name == "os_uid") return os_bindings::builtin_os_uid(args);
+        if (name == "os_gid") return os_bindings::builtin_os_gid(args);
+        if (name == "os_is_admin") return os_bindings::builtin_os_is_admin(args);
+        if (name == "os_elevate") return os_bindings::builtin_os_elevate(args);
+        if (name == "os_sleep_ms") return os_bindings::builtin_os_sleep_ms(args);
+        if (name == "os_env") return os_bindings::builtin_os_env(args);
+        if (name == "os_path_sep") return os_bindings::builtin_os_path_sep(args);
+        if (name == "os_expanduser") return os_bindings::builtin_os_expanduser(args);
+        if (name == "os_expandvars") return os_bindings::builtin_os_expandvars(args);
+        if (name == "os_path_expand") return os_bindings::builtin_os_path_expand(args);
+        if (name == "os_homedir") return os_bindings::builtin_os_homedir(args);
+        if (name == "os_username") return os_bindings::builtin_os_username(args);
+        if (name == "os_groups") return os_bindings::builtin_os_groups(args);
+        if (name == "os_ppid") return os_bindings::builtin_os_ppid(args);
+        if (name == "os_argv") return os_bindings::builtin_os_argv(args);
+        if (name == "os_exit") return os_bindings::builtin_os_exit(args);
+        if (name == "os_which") return os_bindings::builtin_os_which(args);
+        if (name == "os_tempdir") return os_bindings::builtin_os_tempdir(args);
+        if (name == "os_getenvs") return os_bindings::builtin_os_getenvs(args);
+        if (name == "os_env_list") return os_bindings::builtin_os_env_list(args);
+        if (name == "os_access") return os_bindings::builtin_os_access(args);
+        if (name == "os_umask") return os_bindings::builtin_os_umask(args);
+        if (name == "os_env_update") return os_bindings::builtin_os_env_update(args);
+        if (name == "os_getenv_int") return os_bindings::builtin_os_getenv_int(args);
+        if (name == "os_getenv_float") return os_bindings::builtin_os_getenv_float(args);
+        if (name == "os_getenv_bool") return os_bindings::builtin_os_getenv_bool(args);
+        if (name == "os_env_snapshot") return os_bindings::builtin_os_env_snapshot(args);
+        if (name == "os_env_diff") return os_bindings::builtin_os_env_diff(args);
+        if (name == "os_walk") return os_bindings::builtin_os_walk(args);
+        if (name == "os_glob") return os_bindings::builtin_os_glob(args);
+        if (name == "os_disk_usage") return os_bindings::builtin_os_disk_usage(args);
+        if (name == "os_statvfs") return os_bindings::builtin_os_statvfs(args);
+        if (name == "os_touch") return os_bindings::builtin_os_touch(args);
+        if (name == "os_rmdir_rf") return os_bindings::builtin_os_rmdir_rf(args);
+        if (name == "os_mkdir_p") return os_bindings::builtin_os_mkdir_p(args);
+        if (name == "os_ps") return os_bindings::builtin_os_ps(args);
+        if (name == "os_run") return os_bindings::builtin_os_run(args);
+        if (name == "os_waitpid") return os_bindings::builtin_os_waitpid(args);
+        if (name == "os_kill_tree") return os_bindings::builtin_os_kill_tree(args);
+        if (name == "os_run_capture") return os_bindings::builtin_os_run_capture(args);
+        if (name == "os_popen") return os_bindings::builtin_os_popen(args);
+        if (name == "os_spawn_io") return os_bindings::builtin_os_spawn_io(args);
+        if (name == "os_scandir") return os_bindings::builtin_os_scandir(args);
+        if (name == "os_link") return os_bindings::builtin_os_link(args);
+        if (name == "os_renameat") return os_bindings::builtin_os_renameat(args);
+        if (name == "os_lstat") return os_bindings::builtin_os_lstat(args);
+        if (name == "os_fstat") return os_bindings::builtin_os_fstat(args);
+        if (name == "os_open") return os_bindings::builtin_os_open(args);
+        if (name == "os_read") return os_bindings::builtin_os_read(args);
+        if (name == "os_write") return os_bindings::builtin_os_write(args);
+        if (name == "os_fsync") return os_bindings::builtin_os_fsync(args);
+        if (name == "os_close") return os_bindings::builtin_os_close(args);
+        if (name == "os_fdopen") return os_bindings::builtin_os_fdopen(args);
+        if (name == "os_chdir_push") return os_bindings::builtin_os_chdir_push(args);
+        if (name == "os_chdir_pop") return os_bindings::builtin_os_chdir_pop(args);
+        if (name == "os_signal") return os_bindings::builtin_os_signal(args);
+        if (name == "os_alarm") return os_bindings::builtin_os_alarm(args);
+        if (name == "os_pause") return os_bindings::builtin_os_pause(args);
+        if (name == "os_killpg") return os_bindings::builtin_os_killpg(args);
+        if (name == "os_setuid") return os_bindings::builtin_os_setuid(args);
+        if (name == "os_setgid") return os_bindings::builtin_os_setgid(args);
+        if (name == "os_getpgid") return os_bindings::builtin_os_getpgid(args);
+        if (name == "os_setpgid") return os_bindings::builtin_os_setpgid(args);
+        if (name == "os_setsid") return os_bindings::builtin_os_setsid(args);
+        if (name == "os_nice") return os_bindings::builtin_os_nice(args);
+        if (name == "os_getpriority") return os_bindings::builtin_os_getpriority(args);
+        if (name == "os_setpriority") return os_bindings::builtin_os_setpriority(args);
+        if (name == "os_uid_name") return os_bindings::builtin_os_uid_name(args);
+        if (name == "os_gid_name") return os_bindings::builtin_os_gid_name(args);
+        if (name == "os_getpwnam") return os_bindings::builtin_os_getpwnam(args);
+        if (name == "os_getgrnam") return os_bindings::builtin_os_getgrnam(args);
+        if (name == "os_getlogin") return os_bindings::builtin_os_getlogin(args);
+        if (name == "os_getgroups") return os_bindings::builtin_os_getgroups(args);
+        if (name == "os_chflags") return os_bindings::builtin_os_chflags(args);
+        if (name == "os_loadavg") return os_bindings::builtin_os_loadavg(args);
+        if (name == "os_cpu_info") return os_bindings::builtin_os_cpu_info(args);
+        if (name == "os_os_release") return os_bindings::builtin_os_os_release(args);
+        if (name == "os_boot_time") return os_bindings::builtin_os_boot_time(args);
+        if (name == "os_locale") return os_bindings::builtin_os_locale(args);
+        if (name == "os_timezone") return os_bindings::builtin_os_timezone(args);
+        if (name == "os_mounts") return os_bindings::builtin_os_mounts(args);
+        if (name == "os_service_control") return os_bindings::builtin_os_service_control(args);
+        if (name == "os_service_query") return os_bindings::builtin_os_service_query(args);
+        if (name == "os_battery_info") return os_bindings::builtin_os_battery_info(args);
+        if (name == "os_cgroups") return os_bindings::builtin_os_cgroups(args);
+        if (name == "os_namespaces") return os_bindings::builtin_os_namespaces(args);
+        if (name == "os_readlink_info") return os_bindings::builtin_os_readlink_info(args);
+        if (name == "os_realpath_ex") return os_bindings::builtin_os_realpath_ex(args);
         if (name == "fs_exists") return fs_bindings::builtin_fs_exists(args);
         if (name == "fs_is_file") return fs_bindings::builtin_fs_is_file(args);
         if (name == "fs_is_dir") return fs_bindings::builtin_fs_is_dir(args);
@@ -5776,11 +6123,58 @@ std::string value_to_string(const Value &v) {
   return v.to_string();
 }
 
+long value_to_long(const Value &v) {
+  if (v.type == ObjectType::INTEGER) return v.data.integer;
+  if (v.type == ObjectType::FLOAT) return static_cast<long>(v.data.floating);
+  if (v.type == ObjectType::BOOLEAN) return v.data.boolean ? 1 : 0;
+  return std::stol(v.to_string());
+}
+
 bool value_to_bool(const Value &v) {
   if (v.type == ObjectType::BOOLEAN) return v.data.boolean;
   if (v.type == ObjectType::INTEGER) return v.data.integer != 0;
   if (v.type == ObjectType::FLOAT) return v.data.floating != 0.0;
   return v.is_truthy();
+}
+
+std::vector<std::string> value_to_string_list(const Value &v) {
+  if (v.type != ObjectType::LIST) {
+    throw std::runtime_error("Expected list of strings.");
+  }
+  std::vector<std::string> out;
+  out.reserve(v.data.list.size());
+  for (const auto &item : v.data.list) {
+    out.push_back(value_to_string(item));
+  }
+  return out;
+}
+
+bool parse_env_bool(const std::string &value, bool &out) {
+    std::string v = value;
+    std::transform(v.begin(), v.end(), v.begin(), [](unsigned char c) { return std::tolower(c); });
+    if (v == "1" || v == "true" || v == "yes" || v == "on") { out = true; return true; }
+    if (v == "0" || v == "false" || v == "no" || v == "off") { out = false; return true; }
+    return false;
+}
+
+bool run_command_chain(const std::vector<const char*> &cmds) {
+  for (const char* cmd : cmds) {
+    if (!cmd || cmd[0] == '\0') continue;
+    int rc = std::system(cmd);
+    if (rc == 0) return true;
+  }
+  return false;
+}
+
+std::string quote_arg(const std::string &arg) {
+  if (arg.find_first_of(" \t\"") == std::string::npos) return arg;
+  std::string out = "\"";
+  for (char c : arg) {
+    if (c == '"') out += "\\\"";
+    else out += c;
+  }
+  out += "\"";
+  return out;
 }
 
 std::string get_os_name() {
@@ -5794,7 +6188,431 @@ std::string get_os_name() {
   return "posix";
 #endif
 }
+
+std::vector<std::string> g_cli_args;
+std::vector<fs::path> g_cwd_stack;
+
+Value stat_to_value_map(const struct stat &st, bool is_symlink) {
+    Value result(ObjectType::MAP);
+    result.data.map["size"] = Value(static_cast<long>(st.st_size));
+    result.data.map["mode"] = Value(static_cast<long>(st.st_mode));
+    result.data.map["atime"] = Value(static_cast<long>(st.st_atime));
+    result.data.map["mtime"] = Value(static_cast<long>(st.st_mtime));
+    result.data.map["ctime"] = Value(static_cast<long>(st.st_ctime));
+    result.data.map["is_dir"] = Value(S_ISDIR(st.st_mode) != 0);
+    result.data.map["is_file"] = Value(S_ISREG(st.st_mode) != 0);
+    result.data.map["is_symlink"] = Value(is_symlink);
+    return result;
+}
+
+int open_flags_from_string(const std::string &mode) {
+    bool plus = mode.find('+') != std::string::npos;
+    bool append = mode.find('a') != std::string::npos;
+    bool write = mode.find('w') != std::string::npos;
+    bool read = mode.find('r') != std::string::npos || (!write && !append);
+    bool excl = mode.find('x') != std::string::npos;
+
+    int flags = 0;
+    if (plus) flags |= O_RDWR;
+    else if (write || append) flags |= O_WRONLY;
+    else if (read) flags |= O_RDONLY;
+
+    if (write) flags |= O_CREAT | O_TRUNC;
+    if (append) flags |= O_CREAT | O_APPEND;
+    if (excl) flags |= O_EXCL;
+#ifdef _WIN32
+    flags |= _O_BINARY;
+#endif
+    return flags;
+}
+
+int open_flags_from_value(const Value &v) {
+    if (v.type == ObjectType::INTEGER) return static_cast<int>(v.data.integer);
+    if (v.type == ObjectType::FLOAT) return static_cast<int>(v.data.floating);
+    return open_flags_from_string(value_to_string(v));
+}
+
+bool parse_octal_mode(const std::string &s, mode_t &out) {
+    if (s.empty()) return false;
+    for (char c : s) {
+        if (c < '0' || c > '7') return false;
+    }
+    out = static_cast<mode_t>(std::strtol(s.c_str(), nullptr, 8));
+    return true;
+}
+
+bool apply_symbolic_mode(const std::string &spec, mode_t &mode) {
+    size_t start = 0;
+    while (start < spec.size()) {
+        size_t end = spec.find(',', start);
+        if (end == std::string::npos) end = spec.size();
+        std::string clause = spec.substr(start, end - start);
+        start = end + 1;
+        if (clause.empty()) continue;
+
+        size_t i = 0;
+        int who = 0;
+        while (i < clause.size()) {
+            char c = clause[i];
+            if (c == 'u') who |= 0b100;
+            else if (c == 'g') who |= 0b010;
+            else if (c == 'o') who |= 0b001;
+            else if (c == 'a') who |= 0b111;
+            else break;
+            ++i;
+        }
+        if (who == 0) who = 0b111;
+        if (i >= clause.size()) return false;
+        char op = clause[i++];
+        if (op != '+' && op != '-' && op != '=') return false;
+
+        int perm = 0;
+        while (i < clause.size()) {
+            char c = clause[i++];
+            if (c == 'r') perm |= 0b100;
+            else if (c == 'w') perm |= 0b010;
+            else if (c == 'x') perm |= 0b001;
+            else return false;
+        }
+
+        auto apply = [&](int shift) {
+            mode_t mask = static_cast<mode_t>(perm << shift);
+            if (op == '+') mode |= mask;
+            else if (op == '-') mode &= ~mask;
+            else if (op == '=') {
+                mode &= ~static_cast<mode_t>(0b111 << shift);
+                mode |= mask;
+            }
+        };
+
+        if (who & 0b100) apply(6);
+        if (who & 0b010) apply(3);
+        if (who & 0b001) apply(0);
+    }
+    return true;
+}
+
+#ifdef _WIN32
+time_t file_time_to_time_t(const fs::file_time_type &ftime) {
+    using namespace std::chrono;
+    auto sctp = time_point_cast<system_clock::duration>(
+            ftime - fs::file_time_type::clock::now() + system_clock::now());
+    return system_clock::to_time_t(sctp);
+}
+#endif
+
+std::string get_home_dir() {
+#ifdef _WIN32
+    const char *home = std::getenv("USERPROFILE");
+    if (home && *home) return std::string(home);
+    const char *drive = std::getenv("HOMEDRIVE");
+    const char *path = std::getenv("HOMEPATH");
+    if (drive && path) return std::string(drive) + std::string(path);
+    return "";
+#else
+    const char *home = std::getenv("HOME");
+    if (home && *home) return std::string(home);
+    struct passwd *pw = getpwuid(geteuid());
+    if (pw && pw->pw_dir) return std::string(pw->pw_dir);
+    return "";
+#endif
+}
+
+std::string get_temp_dir() {
+#ifdef _WIN32
+    char buf[MAX_PATH];
+    DWORD len = GetTempPathA(MAX_PATH, buf);
+    if (len > 0 && len < MAX_PATH) return std::string(buf, len);
+    return "";
+#else
+    const char *tmp = std::getenv("TMPDIR");
+    if (tmp && *tmp) return std::string(tmp);
+    tmp = std::getenv("TMP");
+    if (tmp && *tmp) return std::string(tmp);
+    tmp = std::getenv("TEMP");
+    if (tmp && *tmp) return std::string(tmp);
+    return "/tmp";
+#endif
+}
+
+std::string expand_user_path(const std::string &path) {
+    if (path.empty() || path[0] != '~') return path;
+    if (path.size() == 1 || path[1] == '/' || path[1] == '\\') {
+        std::string home = get_home_dir();
+        if (home.empty()) return path;
+        return home + path.substr(1);
+    }
+#ifdef _WIN32
+    return path;
+#else
+    size_t slash = path.find('/');
+    std::string user = (slash == std::string::npos) ? path.substr(1) : path.substr(1, slash - 1);
+    struct passwd *pw = getpwnam(user.c_str());
+    if (!pw || !pw->pw_dir) return path;
+    std::string rest = (slash == std::string::npos) ? "" : path.substr(slash);
+    return std::string(pw->pw_dir) + rest;
+#endif
+}
+
+std::string expand_vars(const std::string &input) {
+    std::string out;
+    out.reserve(input.size());
+    for (size_t i = 0; i < input.size();) {
+        char c = input[i];
+        if (c == '$') {
+            if (i + 1 < input.size() && input[i + 1] == '{') {
+                size_t end = input.find('}', i + 2);
+                if (end != std::string::npos) {
+                    std::string key = input.substr(i + 2, end - (i + 2));
+                    const char *val = std::getenv(key.c_str());
+                    if (val) out += val;
+                    i = end + 1;
+                    continue;
+                }
+            }
+            size_t j = i + 1;
+            while (j < input.size() && (std::isalnum(static_cast<unsigned char>(input[j])) || input[j] == '_')) {
+                ++j;
+            }
+            if (j > i + 1) {
+                std::string key = input.substr(i + 1, j - (i + 1));
+                const char *val = std::getenv(key.c_str());
+                if (val) out += val;
+                i = j;
+                continue;
+            }
+        }
+#ifdef _WIN32
+        if (c == '%') {
+            size_t end = input.find('%', i + 1);
+            if (end != std::string::npos) {
+                std::string key = input.substr(i + 1, end - (i + 1));
+                const char *val = std::getenv(key.c_str());
+                if (val) out += val;
+                i = end + 1;
+                continue;
+            }
+        }
+#endif
+        out.push_back(c);
+        ++i;
+    }
+    return out;
+}
+
+std::vector<std::string> split_path_env(const std::string &path_env, char sep) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    while (start <= path_env.size()) {
+        size_t pos = path_env.find(sep, start);
+        if (pos == std::string::npos) pos = path_env.size();
+        std::string part = path_env.substr(start, pos - start);
+        if (!part.empty()) parts.push_back(part);
+        start = pos + 1;
+    }
+    return parts;
+}
+
+bool file_is_executable(const fs::path &p) {
+    std::error_code ec;
+    if (!fs::exists(p, ec) || !fs::is_regular_file(p, ec)) return false;
+#ifdef _WIN32
+    return true;
+#else
+    return access(p.c_str(), X_OK) == 0;
+#endif
+}
+
+std::string find_in_path(const std::string &cmd) {
+    if (cmd.empty()) return "";
+    bool has_sep = cmd.find('/') != std::string::npos || cmd.find('\\') != std::string::npos;
+    if (has_sep) {
+        fs::path direct(cmd);
+        if (file_is_executable(direct)) return direct.string();
+#ifdef _WIN32
+        const char *exts = std::getenv("PATHEXT");
+        std::string pathext = exts ? exts : ".EXE;.BAT;.CMD;.COM";
+        for (const auto &ext : split_path_env(pathext, ';')) {
+            fs::path with_ext = direct;
+            with_ext += ext;
+            if (file_is_executable(with_ext)) return with_ext.string();
+        }
+#endif
+        return "";
+    }
+
+    const char *path_env = std::getenv("PATH");
+    if (!path_env) return "";
+#ifdef _WIN32
+    char sep = ';';
+#else
+    char sep = ':';
+#endif
+    std::vector<std::string> parts = split_path_env(path_env, sep);
+#ifdef _WIN32
+    const char *exts = std::getenv("PATHEXT");
+    std::string pathext = exts ? exts : ".EXE;.BAT;.CMD;.COM";
+    std::vector<std::string> ext_list = split_path_env(pathext, ';');
+#endif
+    for (const auto &dir : parts) {
+        fs::path base = fs::path(dir) / cmd;
+        if (file_is_executable(base)) return base.string();
+#ifdef _WIN32
+        for (const auto &ext : ext_list) {
+            fs::path with_ext = base;
+            with_ext += ext;
+            if (file_is_executable(with_ext)) return with_ext.string();
+        }
+#endif
+    }
+    return "";
+}
+
+int access_mode_from_value(const Value &v) {
+    if (v.type == ObjectType::INTEGER) return static_cast<int>(v.data.integer);
+    if (v.type == ObjectType::FLOAT) return static_cast<int>(v.data.floating);
+    std::string mode = value_to_string(v);
+    if (mode.empty()) {
+#ifdef _WIN32
+        return 0;
+#else
+        return F_OK;
+#endif
+    }
+    int out = 0;
+    for (char c : mode) {
+#ifdef _WIN32
+        if (c == 'r') out |= 4;
+        else if (c == 'w') out |= 2;
+        else if (c == 'x') out |= 0;
+        else if (c == 'f') out |= 0;
+#else
+        if (c == 'r') out |= R_OK;
+        else if (c == 'w') out |= W_OK;
+        else if (c == 'x') out |= X_OK;
+        else if (c == 'f') out |= F_OK;
+#endif
+    }
+    if (out == 0) {
+#ifdef _WIN32
+        out = 0;
+#else
+        out = F_OK;
+#endif
+    }
+    return out;
+}
+
+std::string normalize_sep(const std::string &path) {
+    std::string out = path;
+    std::replace(out.begin(), out.end(), '\\', '/');
+    return out;
+}
+
+std::vector<std::string> split_components(const std::string &path) {
+    std::vector<std::string> parts;
+    std::string norm = normalize_sep(path);
+    size_t start = 0;
+    while (start <= norm.size()) {
+        size_t pos = norm.find('/', start);
+        if (pos == std::string::npos) pos = norm.size();
+        std::string part = norm.substr(start, pos - start);
+        if (!part.empty()) parts.push_back(part);
+        start = pos + 1;
+    }
+    return parts;
+}
+
+bool contains_wildcard(const std::string &part) {
+    return part.find_first_of("*?") != std::string::npos;
+}
+
+bool match_component(const std::string &pattern, const std::string &text) {
+    size_t p = 0;
+    size_t t = 0;
+    size_t star = std::string::npos;
+    size_t match = 0;
+
+    while (t < text.size()) {
+        if (p < pattern.size() && (pattern[p] == '?' || pattern[p] == text[t])) {
+            ++p;
+            ++t;
+        } else if (p < pattern.size() && pattern[p] == '*') {
+            star = p++;
+            match = t;
+        } else if (star != std::string::npos) {
+            p = star + 1;
+            t = ++match;
+        } else {
+            return false;
+        }
+    }
+
+    while (p < pattern.size() && pattern[p] == '*') ++p;
+    return p == pattern.size();
+}
+
+bool match_components(const std::vector<std::string> &pattern_parts,
+                                            size_t pi,
+                                            const std::vector<std::string> &path_parts,
+                                            size_t si) {
+    if (pi == pattern_parts.size()) return si == path_parts.size();
+    if (pattern_parts[pi] == "**") {
+        for (size_t k = si; k <= path_parts.size(); ++k) {
+            if (match_components(pattern_parts, pi + 1, path_parts, k)) return true;
+        }
+        return false;
+    }
+    if (si == path_parts.size()) return false;
+    if (!match_component(pattern_parts[pi], path_parts[si])) return false;
+    return match_components(pattern_parts, pi + 1, path_parts, si + 1);
+}
+
+Value build_walk_entry(const fs::path &root,
+                                             const std::vector<std::string> &dirs,
+                                             const std::vector<std::string> &files) {
+    Value entry(ObjectType::MAP);
+    entry.data.map["root"] = Value(root.string());
+    Value dlist(ObjectType::LIST);
+    for (const auto &d : dirs) dlist.data.list.push_back(Value(d));
+    Value flist(ObjectType::LIST);
+    for (const auto &f : files) flist.data.list.push_back(Value(f));
+    entry.data.map["dirs"] = dlist;
+    entry.data.map["files"] = flist;
+    return entry;
+}
+
+#ifndef _WIN32
+std::string read_all_from_fd(int fd) {
+    std::string out;
+    char buf[4096];
+    while (true) {
+        ssize_t n = read(fd, buf, sizeof(buf));
+        if (n <= 0) break;
+        out.append(buf, static_cast<size_t>(n));
+    }
+    return out;
+}
+#else
+std::string read_all_from_handle(HANDLE h) {
+    std::string out;
+    char buf[4096];
+    DWORD read_bytes = 0;
+    while (ReadFile(h, buf, sizeof(buf), &read_bytes, nullptr) && read_bytes > 0) {
+        out.append(buf, static_cast<size_t>(read_bytes));
+    }
+    return out;
+}
+#endif
 } // namespace
+
+void set_cli_args(int argc, char* argv[]) {
+    g_cli_args.clear();
+    g_cli_args.reserve(argc);
+    for (int i = 0; i < argc; ++i) {
+        g_cli_args.push_back(argv[i] ? std::string(argv[i]) : std::string());
+    }
+}
 
 Value builtin_os_name(const std::vector<Value> &args) {
   (void)args;
@@ -5941,6 +6759,2679 @@ Value builtin_os_unsetenv(const std::vector<Value> &args) {
   return Value(rc == 0);
 }
 
+Value builtin_os_getenvs(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.getenvs() expects 0 arguments.");
+    }
+    std::vector<std::string> keys;
+#ifdef _WIN32
+    LPCH env = GetEnvironmentStringsA();
+    if (!env) return Value(ObjectType::LIST);
+    for (LPCH var = env; *var; ) {
+        std::string entry(var);
+        size_t pos = entry.find('=');
+        if (pos != std::string::npos) keys.push_back(entry.substr(0, pos));
+        var += entry.size() + 1;
+    }
+    FreeEnvironmentStringsA(env);
+#else
+    for (char **env = ::environ; env && *env; ++env) {
+        std::string entry(*env);
+        size_t pos = entry.find('=');
+        if (pos != std::string::npos) keys.push_back(entry.substr(0, pos));
+    }
+#endif
+    std::sort(keys.begin(), keys.end());
+    keys.erase(std::unique(keys.begin(), keys.end()), keys.end());
+    Value result(ObjectType::LIST);
+    for (const auto &k : keys) result.data.list.push_back(Value(k));
+    return result;
+}
+
+Value builtin_os_env_list(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.env_list() expects 0 arguments.");
+    }
+    std::vector<std::string> entries;
+#ifdef _WIN32
+    LPCH env = GetEnvironmentStringsA();
+    if (!env) return Value(ObjectType::LIST);
+    for (LPCH var = env; *var; ) {
+        entries.push_back(std::string(var));
+        var += std::string(var).size() + 1;
+    }
+    FreeEnvironmentStringsA(env);
+#else
+    for (char **env = ::environ; env && *env; ++env) {
+        entries.push_back(std::string(*env));
+    }
+#endif
+    std::sort(entries.begin(), entries.end());
+    Value result(ObjectType::LIST);
+    for (const auto &e : entries) result.data.list.push_back(Value(e));
+    return result;
+}
+
+Value builtin_os_env_update(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.env_update(map, overwrite=true) expects 1 or 2 arguments.");
+    }
+    if (args[0].type != ObjectType::MAP) {
+        throw std::runtime_error("os.env_update expects a map of key->value.");
+    }
+    bool overwrite = args.size() == 2 ? value_to_bool(args[1]) : true;
+
+    struct EnvBackup {
+        std::string key;
+        bool had;
+        std::string value;
+    };
+    std::vector<EnvBackup> backups;
+    backups.reserve(args[0].data.map.size());
+
+    for (const auto &kv : args[0].data.map) {
+        const char *prev = std::getenv(kv.first.c_str());
+        backups.push_back({kv.first, prev != nullptr, prev ? std::string(prev) : std::string()});
+    }
+
+    auto set_key = [&](const std::string &key, const Value &val) -> bool {
+        if (val.type == ObjectType::NONE) {
+#ifdef _WIN32
+            return _putenv_s(key.c_str(), "") == 0;
+#else
+            return unsetenv(key.c_str()) == 0;
+#endif
+        }
+        if (!overwrite) {
+            const char *existing = std::getenv(key.c_str());
+            if (existing) return true;
+        }
+        std::string value = value_to_string(val);
+#ifdef _WIN32
+        return _putenv_s(key.c_str(), value.c_str()) == 0;
+#else
+        return setenv(key.c_str(), value.c_str(), 1) == 0;
+#endif
+    };
+
+    for (const auto &kv : args[0].data.map) {
+        if (!set_key(kv.first, kv.second)) {
+            for (const auto &b : backups) {
+                if (b.had) {
+#ifdef _WIN32
+                    _putenv_s(b.key.c_str(), b.value.c_str());
+#else
+                    setenv(b.key.c_str(), b.value.c_str(), 1);
+#endif
+                } else {
+#ifdef _WIN32
+                    _putenv_s(b.key.c_str(), "");
+#else
+                    unsetenv(b.key.c_str());
+#endif
+                }
+            }
+            return Value(false);
+        }
+    }
+    return Value(true);
+}
+
+Value builtin_os_getenv_int(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.getenv_int(key, default=0) expects 1 or 2 arguments.");
+    }
+    std::string key = value_to_string(args[0]);
+    const char *val = std::getenv(key.c_str());
+    if (!val) return Value(args.size() == 2 ? value_to_long(args[1]) : 0L);
+    char *end = nullptr;
+    long out = std::strtol(val, &end, 10);
+    if (end == val) return Value(args.size() == 2 ? value_to_long(args[1]) : 0L);
+    return Value(out);
+}
+
+Value builtin_os_getenv_float(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.getenv_float(key, default=0.0) expects 1 or 2 arguments.");
+    }
+    std::string key = value_to_string(args[0]);
+    const char *val = std::getenv(key.c_str());
+    double def = 0.0;
+    if (args.size() == 2) {
+        if (args[1].type == ObjectType::FLOAT) def = args[1].data.floating;
+        else if (args[1].type == ObjectType::INTEGER) def = static_cast<double>(args[1].data.integer);
+        else if (args[1].type == ObjectType::BOOLEAN) def = args[1].data.boolean ? 1.0 : 0.0;
+        else def = std::strtod(args[1].to_string().c_str(), nullptr);
+    }
+    if (!val) return Value(def);
+    char *end = nullptr;
+    double out = std::strtod(val, &end);
+    if (end == val) return Value(def);
+    return Value(out);
+}
+
+Value builtin_os_getenv_bool(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.getenv_bool(key, default=false) expects 1 or 2 arguments.");
+    }
+    std::string key = value_to_string(args[0]);
+    const char *val = std::getenv(key.c_str());
+    bool out = args.size() == 2 ? value_to_bool(args[1]) : false;
+    if (!val) return Value(out);
+    bool parsed = false;
+    bool value = false;
+    parsed = parse_env_bool(std::string(val), value);
+    return Value(parsed ? value : out);
+}
+
+Value builtin_os_env_snapshot(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.env_snapshot() expects 0 arguments.");
+    }
+    return builtin_os_env({});
+}
+
+Value builtin_os_env_diff(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.env_diff(old, new) expects 2 arguments.");
+    }
+    if (args[0].type != ObjectType::MAP || args[1].type != ObjectType::MAP) {
+        throw std::runtime_error("os.env_diff expects two maps.");
+    }
+    const auto &oldm = args[0].data.map;
+    const auto &newm = args[1].data.map;
+
+    Value added(ObjectType::MAP);
+    Value removed(ObjectType::MAP);
+    Value changed(ObjectType::MAP);
+
+    for (const auto &kv : newm) {
+        auto it = oldm.find(kv.first);
+        if (it == oldm.end()) {
+            added.data.map[kv.first] = kv.second;
+        } else if (it->second.to_string() != kv.second.to_string()) {
+            Value change(ObjectType::MAP);
+            change.data.map["old"] = it->second;
+            change.data.map["new"] = kv.second;
+            changed.data.map[kv.first] = change;
+        }
+    }
+    for (const auto &kv : oldm) {
+        if (newm.find(kv.first) == newm.end()) {
+            removed.data.map[kv.first] = kv.second;
+        }
+    }
+
+    Value result(ObjectType::MAP);
+    result.data.map["added"] = added;
+    result.data.map["removed"] = removed;
+    result.data.map["changed"] = changed;
+    return result;
+}
+
+Value builtin_os_expanduser(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.expanduser(path) expects 1 argument.");
+    }
+    return Value(expand_user_path(value_to_string(args[0])));
+}
+
+Value builtin_os_expandvars(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.expandvars(path) expects 1 argument.");
+    }
+    return Value(expand_vars(value_to_string(args[0])));
+}
+
+Value builtin_os_path_expand(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.path_expand(path) expects 1 argument.");
+    }
+    std::string path = value_to_string(args[0]);
+    return Value(expand_vars(expand_user_path(path)));
+}
+
+Value builtin_os_homedir(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.homedir() expects 0 arguments.");
+    }
+    return Value(get_home_dir());
+}
+
+Value builtin_os_username(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.username() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    char name_buf[UNLEN + 1];
+    DWORD size = UNLEN + 1;
+    if (GetUserNameA(name_buf, &size)) return Value(std::string(name_buf));
+    return Value("");
+#else
+    uid_t uid = geteuid();
+    struct passwd *pw = getpwuid(uid);
+    if (pw && pw->pw_name) return Value(std::string(pw->pw_name));
+    return Value("");
+#endif
+}
+
+Value builtin_os_groups(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.groups() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+#ifdef _WIN32
+    return result;
+#else
+    int count = getgroups(0, nullptr);
+    if (count <= 0) return result;
+    std::vector<gid_t> gids(static_cast<size_t>(count));
+    if (getgroups(count, gids.data()) < 0) return result;
+    std::vector<std::string> names;
+    for (gid_t gid : gids) {
+        struct group *gr = getgrgid(gid);
+        if (gr && gr->gr_name) names.push_back(std::string(gr->gr_name));
+    }
+    std::sort(names.begin(), names.end());
+    names.erase(std::unique(names.begin(), names.end()), names.end());
+    for (const auto &n : names) result.data.list.push_back(Value(n));
+    return result;
+#endif
+}
+
+Value builtin_os_ppid(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.ppid() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    return Value(-1L);
+#else
+    return Value(static_cast<long>(getppid()));
+#endif
+}
+
+Value builtin_os_argv(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.argv() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+    for (const auto &arg : g_cli_args) result.data.list.push_back(Value(arg));
+    return result;
+}
+
+Value builtin_os_exit(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.exit(code=0) expects 0 or 1 argument.");
+    }
+    int code = args.empty() ? 0 : static_cast<int>(value_to_long(args[0]));
+    std::exit(code);
+    return Value(true);
+}
+
+Value builtin_os_which(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.which(cmd) expects 1 argument.");
+    }
+    std::string cmd = value_to_string(args[0]);
+    std::string found = find_in_path(cmd);
+    if (found.empty()) return Value();
+    return Value(found);
+}
+
+Value builtin_os_tempdir(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.tempdir() expects 0 arguments.");
+    }
+    return Value(get_temp_dir());
+}
+
+Value builtin_os_access(const std::vector<Value> &args) {
+    if (args.size() < 1 || args.size() > 2) {
+        throw std::runtime_error("os.access(path, mode='f') expects 1 or 2 arguments.");
+    }
+    std::string path = value_to_string(args[0]);
+    int mode = args.size() == 2 ? access_mode_from_value(args[1]) : access_mode_from_value(Value("f"));
+#ifdef _WIN32
+    int rc = _access(path.c_str(), mode);
+#else
+    int rc = access(path.c_str(), mode);
+#endif
+    return Value(rc == 0);
+}
+
+Value builtin_os_umask(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.umask(mask?) expects 0 or 1 argument.");
+    }
+#ifdef _WIN32
+    int old = _umask(0);
+    _umask(old);
+    if (args.empty()) return Value(static_cast<long>(old));
+    int new_mask = static_cast<int>(value_to_long(args[0]));
+    int prev = _umask(new_mask);
+    return Value(static_cast<long>(prev));
+#else
+    mode_t old = umask(0);
+    umask(old);
+    if (args.empty()) return Value(static_cast<long>(old));
+    mode_t new_mask = static_cast<mode_t>(value_to_long(args[0]));
+    mode_t prev = umask(new_mask);
+    return Value(static_cast<long>(prev));
+#endif
+}
+
+Value builtin_os_walk(const std::vector<Value> &args) {
+    if (args.size() > 2) {
+        throw std::runtime_error("os.walk(path='.', topdown=true) expects 0 to 2 arguments.");
+    }
+    fs::path root = args.empty() ? fs::path(".") : fs::path(value_to_string(args[0]));
+    bool topdown = args.size() == 2 ? value_to_bool(args[1]) : true;
+    Value result(ObjectType::LIST);
+    std::error_code ec;
+    if (!fs::exists(root, ec) || !fs::is_directory(root, ec)) return result;
+
+    std::function<void(const fs::path&)> walk_dir = [&](const fs::path &dir) {
+        std::vector<std::string> dirs;
+        std::vector<std::string> files;
+        std::error_code iter_ec;
+        for (const auto &entry : fs::directory_iterator(dir, iter_ec)) {
+            std::string name = entry.path().filename().string();
+            if (entry.is_directory(iter_ec)) dirs.push_back(name);
+            else files.push_back(name);
+        }
+        std::sort(dirs.begin(), dirs.end());
+        std::sort(files.begin(), files.end());
+
+        if (topdown) result.data.list.push_back(build_walk_entry(dir, dirs, files));
+        for (const auto &d : dirs) walk_dir(dir / d);
+        if (!topdown) result.data.list.push_back(build_walk_entry(dir, dirs, files));
+    };
+
+    walk_dir(root);
+    return result;
+}
+
+Value builtin_os_glob(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.glob(pattern, recursive=false) expects 1 or 2 arguments.");
+    }
+    std::string pattern = value_to_string(args[0]);
+    pattern = expand_vars(expand_user_path(pattern));
+    bool recursive = args.size() == 2 ? value_to_bool(args[1]) : false;
+
+    fs::path pattern_path(pattern);
+    fs::path root = pattern_path.root_path();
+    std::string rel = pattern_path.relative_path().generic_string();
+    std::vector<std::string> parts = split_components(rel);
+
+    size_t first_wild = parts.size();
+    for (size_t i = 0; i < parts.size(); ++i) {
+        if (parts[i] == "**" || contains_wildcard(parts[i])) {
+            first_wild = i;
+            break;
+        }
+    }
+
+    fs::path base = root;
+    for (size_t i = 0; i < first_wild; ++i) base /= parts[i];
+    if (base.empty()) base = fs::path(".");
+
+    if (first_wild == parts.size()) {
+        Value result(ObjectType::LIST);
+        std::error_code ec;
+        if (fs::exists(base, ec)) result.data.list.push_back(Value(base.string()));
+        return result;
+    }
+
+    std::vector<std::string> pattern_parts(parts.begin() + first_wild, parts.end());
+    bool use_recursive = recursive || std::find(pattern_parts.begin(), pattern_parts.end(), "**") != pattern_parts.end();
+
+    Value result(ObjectType::LIST);
+    std::error_code ec;
+    if (!fs::exists(base, ec) || !fs::is_directory(base, ec)) return result;
+
+    if (match_components(pattern_parts, 0, std::vector<std::string>{}, 0)) {
+        result.data.list.push_back(Value(base.string()));
+    }
+
+    if (use_recursive) {
+        for (const auto &entry : fs::recursive_directory_iterator(base, ec)) {
+            if (ec) break;
+            std::error_code rel_ec;
+            fs::path rel_path = fs::relative(entry.path(), base, rel_ec);
+            if (rel_ec) continue;
+            std::vector<std::string> rel_parts = split_components(rel_path.generic_string());
+            if (match_components(pattern_parts, 0, rel_parts, 0)) {
+                result.data.list.push_back(Value(entry.path().string()));
+            }
+        }
+    } else {
+        for (const auto &entry : fs::directory_iterator(base, ec)) {
+            if (ec) break;
+            std::error_code rel_ec;
+            fs::path rel_path = fs::relative(entry.path(), base, rel_ec);
+            if (rel_ec) continue;
+            std::vector<std::string> rel_parts = split_components(rel_path.generic_string());
+            if (match_components(pattern_parts, 0, rel_parts, 0)) {
+                result.data.list.push_back(Value(entry.path().string()));
+            }
+        }
+    }
+
+    return result;
+}
+
+Value builtin_os_disk_usage(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.disk_usage(path='.') expects 0 or 1 argument.");
+    }
+    fs::path p = args.empty() ? fs::path(".") : fs::path(value_to_string(args[0]));
+    std::error_code ec;
+    auto info = fs::space(p, ec);
+    Value result(ObjectType::MAP);
+    if (ec) {
+        result.data.map["total"] = Value(0L);
+        result.data.map["free"] = Value(0L);
+        result.data.map["available"] = Value(0L);
+        result.data.map["used"] = Value(0L);
+        return result;
+    }
+    long total = static_cast<long>(info.capacity);
+    long free = static_cast<long>(info.free);
+    long available = static_cast<long>(info.available);
+    result.data.map["total"] = Value(total);
+    result.data.map["free"] = Value(free);
+    result.data.map["available"] = Value(available);
+    result.data.map["used"] = Value(total - free);
+    return result;
+}
+
+Value builtin_os_statvfs(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.statvfs(path='.') expects 0 or 1 argument.");
+    }
+    fs::path p = args.empty() ? fs::path(".") : fs::path(value_to_string(args[0]));
+    Value result(ObjectType::MAP);
+#ifdef _WIN32
+    ULARGE_INTEGER free_bytes = {};
+    ULARGE_INTEGER total_bytes = {};
+    ULARGE_INTEGER avail_bytes = {};
+    if (GetDiskFreeSpaceExA(p.string().c_str(), &avail_bytes, &total_bytes, &free_bytes)) {
+        long total = static_cast<long>(total_bytes.QuadPart);
+        long free = static_cast<long>(free_bytes.QuadPart);
+        long avail = static_cast<long>(avail_bytes.QuadPart);
+        result.data.map["bsize"] = Value(1L);
+        result.data.map["frsize"] = Value(1L);
+        result.data.map["blocks"] = Value(total);
+        result.data.map["bfree"] = Value(free);
+        result.data.map["bavail"] = Value(avail);
+    } else {
+        result.data.map["bsize"] = Value(0L);
+        result.data.map["frsize"] = Value(0L);
+        result.data.map["blocks"] = Value(0L);
+        result.data.map["bfree"] = Value(0L);
+        result.data.map["bavail"] = Value(0L);
+    }
+    result.data.map["files"] = Value(0L);
+    result.data.map["ffree"] = Value(0L);
+    result.data.map["favail"] = Value(0L);
+    result.data.map["flag"] = Value(0L);
+    result.data.map["namemax"] = Value(0L);
+    return result;
+#else
+    struct statvfs st;
+    if (statvfs(p.c_str(), &st) != 0) return result;
+    result.data.map["bsize"] = Value(static_cast<long>(st.f_bsize));
+    result.data.map["frsize"] = Value(static_cast<long>(st.f_frsize));
+    result.data.map["blocks"] = Value(static_cast<long>(st.f_blocks));
+    result.data.map["bfree"] = Value(static_cast<long>(st.f_bfree));
+    result.data.map["bavail"] = Value(static_cast<long>(st.f_bavail));
+    result.data.map["files"] = Value(static_cast<long>(st.f_files));
+    result.data.map["ffree"] = Value(static_cast<long>(st.f_ffree));
+    result.data.map["favail"] = Value(static_cast<long>(st.f_favail));
+    result.data.map["flag"] = Value(static_cast<long>(st.f_flag));
+    result.data.map["namemax"] = Value(static_cast<long>(st.f_namemax));
+    return result;
+#endif
+}
+
+Value builtin_os_touch(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.touch(path) expects 1 argument.");
+    }
+    fs::path p(value_to_string(args[0]));
+    std::error_code ec;
+    if (!fs::exists(p, ec)) {
+        std::ofstream out(p.string(), std::ios::app);
+        if (!out) return Value(false);
+    }
+    auto now = fs::file_time_type::clock::now();
+    fs::last_write_time(p, now, ec);
+    return Value(!ec);
+}
+
+Value builtin_os_rmdir_rf(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.rmdir_rf(path) expects 1 argument.");
+    }
+    fs::path p(value_to_string(args[0]));
+    std::error_code ec;
+    fs::remove_all(p, ec);
+    return Value(!ec);
+}
+
+Value builtin_os_mkdir_p(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.mkdir_p(path) expects 1 argument.");
+    }
+    fs::path p(value_to_string(args[0]));
+    std::error_code ec;
+    bool ok = fs::create_directories(p, ec);
+    return Value(ok || fs::exists(p, ec));
+}
+
+Value builtin_os_scandir(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.scandir(path='.') expects 0 or 1 argument.");
+    }
+    fs::path p = args.empty() ? fs::path(".") : fs::path(value_to_string(args[0]));
+    Value result(ObjectType::LIST);
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator(p, ec)) {
+        if (ec) break;
+        Value item(ObjectType::MAP);
+        item.data.map["name"] = Value(entry.path().filename().string());
+        item.data.map["path"] = Value(entry.path().string());
+        bool is_symlink = entry.is_symlink(ec);
+        bool is_dir = entry.is_directory(ec);
+        bool is_file = entry.is_regular_file(ec);
+        item.data.map["is_symlink"] = Value(is_symlink);
+        item.data.map["is_dir"] = Value(is_dir);
+        item.data.map["is_file"] = Value(is_file);
+        if (is_file) {
+            std::error_code size_ec;
+            item.data.map["size"] = Value(static_cast<long>(entry.file_size(size_ec)));
+        } else {
+            item.data.map["size"] = Value(0L);
+        }
+        result.data.list.push_back(item);
+    }
+    return result;
+}
+
+Value builtin_os_link(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.link(src, dst) expects 2 arguments.");
+    }
+    std::string src = value_to_string(args[0]);
+    std::string dst = value_to_string(args[1]);
+#ifdef _WIN32
+    BOOL ok = CreateHardLinkA(dst.c_str(), src.c_str(), nullptr);
+    return Value(ok != 0);
+#else
+    int rc = link(src.c_str(), dst.c_str());
+    return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_renameat(const std::vector<Value> &args) {
+    if (args.size() != 4) {
+        throw std::runtime_error("os.renameat(olddir, oldname, newdir, newname) expects 4 arguments.");
+    }
+    std::string olddir = value_to_string(args[0]);
+    std::string oldname = value_to_string(args[1]);
+    std::string newdir = value_to_string(args[2]);
+    std::string newname = value_to_string(args[3]);
+#ifdef _WIN32
+    fs::path oldpath = olddir.empty() ? fs::path(oldname) : fs::path(olddir) / oldname;
+    fs::path newpath = newdir.empty() ? fs::path(newname) : fs::path(newdir) / newname;
+    BOOL ok = MoveFileExA(oldpath.string().c_str(), newpath.string().c_str(), MOVEFILE_REPLACE_EXISTING);
+    return Value(ok != 0);
+#else
+    int oldfd = AT_FDCWD;
+    int newfd = AT_FDCWD;
+    if (!olddir.empty()) {
+#ifdef O_DIRECTORY
+        oldfd = open(olddir.c_str(), O_RDONLY | O_DIRECTORY);
+#else
+        oldfd = open(olddir.c_str(), O_RDONLY);
+#endif
+        if (oldfd < 0) return Value(false);
+    }
+    if (!newdir.empty()) {
+#ifdef O_DIRECTORY
+        newfd = open(newdir.c_str(), O_RDONLY | O_DIRECTORY);
+#else
+        newfd = open(newdir.c_str(), O_RDONLY);
+#endif
+        if (newfd < 0) {
+            if (oldfd != AT_FDCWD) close(oldfd);
+            return Value(false);
+        }
+    }
+    int rc = renameat(oldfd, oldname.c_str(), newfd, newname.c_str());
+    if (oldfd != AT_FDCWD) close(oldfd);
+    if (newfd != AT_FDCWD) close(newfd);
+    return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_lstat(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.lstat(path) expects 1 argument.");
+    }
+    std::string path = value_to_string(args[0]);
+#ifdef _WIN32
+    fs::path p(path);
+    std::error_code ec;
+    auto sym = fs::symlink_status(p, ec);
+    if (ec) return Value();
+    bool is_symlink = sym.type() == fs::file_type::symlink;
+    auto st = fs::status(p, ec);
+    if (ec) return Value();
+    Value result(ObjectType::MAP);
+    bool is_dir = fs::is_directory(st);
+    bool is_file = fs::is_regular_file(st);
+    long size = 0;
+    if (is_file) {
+        std::error_code size_ec;
+        size = static_cast<long>(fs::file_size(p, size_ec));
+    }
+    time_t mtime = 0;
+    std::error_code time_ec;
+    auto ftime = fs::last_write_time(p, time_ec);
+    if (!time_ec) mtime = file_time_to_time_t(ftime);
+    result.data.map["size"] = Value(size);
+    result.data.map["mode"] = Value(0L);
+    result.data.map["atime"] = Value(mtime);
+    result.data.map["mtime"] = Value(mtime);
+    result.data.map["ctime"] = Value(mtime);
+    result.data.map["is_dir"] = Value(is_dir);
+    result.data.map["is_file"] = Value(is_file);
+    result.data.map["is_symlink"] = Value(is_symlink);
+    return result;
+#else
+    struct stat st;
+    if (lstat(path.c_str(), &st) != 0) return Value();
+    return stat_to_value_map(st, S_ISLNK(st.st_mode) != 0);
+#endif
+}
+
+Value builtin_os_fstat(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.fstat(fd) expects 1 argument.");
+    }
+    long fd = value_to_long(args[0]);
+    struct stat st;
+    if (fstat(static_cast<int>(fd), &st) != 0) return Value();
+    return stat_to_value_map(st, false);
+}
+
+Value builtin_os_open(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 3) {
+        throw std::runtime_error("os.open(path, flags='r', mode=0666) expects 1 to 3 arguments.");
+    }
+    std::string path = value_to_string(args[0]);
+    Value flags_val = args.size() >= 2 ? args[1] : Value("r");
+    int flags = open_flags_from_value(flags_val);
+    int mode = args.size() == 3 ? static_cast<int>(value_to_long(args[2])) : 0666;
+#ifdef _WIN32
+    int fd = _open(path.c_str(), flags, mode);
+#else
+    int fd = open(path.c_str(), flags, mode);
+#endif
+    if (fd < 0) throw std::runtime_error("os.open failed for: " + path);
+    return Value(static_cast<long>(fd));
+}
+
+Value builtin_os_read(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.read(fd, n) expects 2 arguments.");
+    }
+    long fd = value_to_long(args[0]);
+    long want = value_to_long(args[1]);
+    std::string out;
+    char buf[4096];
+#ifdef _WIN32
+    if (want < 0) {
+        while (true) {
+            int n = _read(static_cast<int>(fd), buf, sizeof(buf));
+            if (n <= 0) break;
+            out.append(buf, static_cast<size_t>(n));
+        }
+    } else {
+        long remaining = want;
+        while (remaining > 0) {
+            int chunk = remaining > static_cast<long>(sizeof(buf)) ? static_cast<int>(sizeof(buf)) : static_cast<int>(remaining);
+            int n = _read(static_cast<int>(fd), buf, chunk);
+            if (n <= 0) break;
+            out.append(buf, static_cast<size_t>(n));
+            remaining -= n;
+        }
+    }
+#else
+    if (want < 0) {
+        while (true) {
+            ssize_t n = read(static_cast<int>(fd), buf, sizeof(buf));
+            if (n <= 0) break;
+            out.append(buf, static_cast<size_t>(n));
+        }
+    } else {
+        long remaining = want;
+        while (remaining > 0) {
+            size_t chunk = remaining > static_cast<long>(sizeof(buf)) ? sizeof(buf) : static_cast<size_t>(remaining);
+            ssize_t n = read(static_cast<int>(fd), buf, chunk);
+            if (n <= 0) break;
+            out.append(buf, static_cast<size_t>(n));
+            remaining -= static_cast<long>(n);
+        }
+    }
+#endif
+    return Value(out);
+}
+
+Value builtin_os_write(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.write(fd, data) expects 2 arguments.");
+    }
+    long fd = value_to_long(args[0]);
+    std::string data = value_to_string(args[1]);
+#ifdef _WIN32
+    int written = _write(static_cast<int>(fd), data.data(), static_cast<unsigned int>(data.size()));
+    if (written < 0) written = 0;
+    return Value(static_cast<long>(written));
+#else
+    ssize_t written = write(static_cast<int>(fd), data.data(), data.size());
+    if (written < 0) written = 0;
+    return Value(static_cast<long>(written));
+#endif
+}
+
+Value builtin_os_fsync(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.fsync(fd) expects 1 argument.");
+    }
+    long fd = value_to_long(args[0]);
+#ifdef _WIN32
+    int rc = _commit(static_cast<int>(fd));
+#else
+    int rc = fsync(static_cast<int>(fd));
+#endif
+    return Value(rc == 0);
+}
+
+Value builtin_os_close(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.close(fd) expects 1 argument.");
+    }
+    long fd = value_to_long(args[0]);
+#ifdef _WIN32
+    int rc = _close(static_cast<int>(fd));
+#else
+    int rc = close(static_cast<int>(fd));
+#endif
+    return Value(rc == 0);
+}
+
+Value builtin_os_fdopen(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.fdopen(fd, mode='r') expects 1 or 2 arguments.");
+    }
+    long fd = value_to_long(args[0]);
+    (void)fd;
+    Value obj(ObjectType::MAP);
+    obj.data.map["__fd__"] = Value(static_cast<long>(fd));
+
+    Value read_func(ObjectType::FUNCTION);
+    read_func.data.function = Value::Data::Function("fd.read", {"n"});
+    obj.data.map["read"] = read_func;
+
+    Value write_func(ObjectType::FUNCTION);
+    write_func.data.function = Value::Data::Function("fd.write", {"data"});
+    obj.data.map["write"] = write_func;
+
+    Value close_func(ObjectType::FUNCTION);
+    close_func.data.function = Value::Data::Function("fd.close", {});
+    obj.data.map["close"] = close_func;
+
+    return obj;
+}
+
+Value builtin_os_chdir_push(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.chdir_push(path) expects 1 argument.");
+    }
+    g_cwd_stack.push_back(fs::current_path());
+    fs::current_path(fs::path(value_to_string(args[0])));
+    return Value(true);
+}
+
+Value builtin_os_chdir_pop(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.chdir_pop() expects 0 arguments.");
+    }
+    if (g_cwd_stack.empty()) return Value(false);
+    fs::current_path(g_cwd_stack.back());
+    g_cwd_stack.pop_back();
+    return Value(true);
+}
+
+Value builtin_os_signal(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.signal(sig, action) expects 2 arguments.");
+    }
+    int sig = static_cast<int>(value_to_long(args[0]));
+    std::string action = value_to_string(args[1]);
+    void (*handler)(int) = nullptr;
+    if (action == "ignore") handler = SIG_IGN;
+    else if (action == "default") handler = SIG_DFL;
+    else throw std::runtime_error("os.signal action must be 'ignore' or 'default'.");
+
+    void (*prev)(int) = signal(sig, handler);
+    if (prev == SIG_ERR) {
+        throw std::runtime_error("os.signal failed for signal");
+    }
+    if (prev == SIG_IGN) return Value("ignore");
+    if (prev == SIG_DFL) return Value("default");
+    return Value("handler");
+}
+
+Value builtin_os_alarm(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.alarm(seconds) expects 1 argument.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(0L);
+#else
+    unsigned int sec = static_cast<unsigned int>(value_to_long(args[0]));
+    unsigned int prev = alarm(sec);
+    return Value(static_cast<long>(prev));
+#endif
+}
+
+Value builtin_os_pause(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.pause() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    return Value(false);
+#else
+    pause();
+    return Value(true);
+#endif
+}
+
+Value builtin_os_killpg(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.killpg(pgid, signal=9) expects 1 or 2 arguments.");
+    }
+    long pgid = value_to_long(args[0]);
+    long sig = args.size() == 2 ? value_to_long(args[1]) : 9;
+#ifdef _WIN32
+    return Value(false);
+#else
+    int rc = killpg(static_cast<pid_t>(pgid), static_cast<int>(sig));
+    return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_setuid(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.setuid(uid) expects 1 argument.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(false);
+#else
+    uid_t uid = static_cast<uid_t>(value_to_long(args[0]));
+    return Value(setuid(uid) == 0);
+#endif
+}
+
+Value builtin_os_setgid(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.setgid(gid) expects 1 argument.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(false);
+#else
+    gid_t gid = static_cast<gid_t>(value_to_long(args[0]));
+    return Value(setgid(gid) == 0);
+#endif
+}
+
+Value builtin_os_getpgid(const std::vector<Value> &args) {
+    if (args.size() > 1) {
+        throw std::runtime_error("os.getpgid(pid=0) expects 0 or 1 argument.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(-1L);
+#else
+    pid_t pid = args.empty() ? 0 : static_cast<pid_t>(value_to_long(args[0]));
+    pid_t pgid = getpgid(pid);
+    if (pgid < 0) return Value(-1L);
+    return Value(static_cast<long>(pgid));
+#endif
+}
+
+Value builtin_os_setpgid(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.setpgid(pid, pgid) expects 2 arguments.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(false);
+#else
+    pid_t pid = static_cast<pid_t>(value_to_long(args[0]));
+    pid_t pgid = static_cast<pid_t>(value_to_long(args[1]));
+    return Value(setpgid(pid, pgid) == 0);
+#endif
+}
+
+Value builtin_os_setsid(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.setsid() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(-1L);
+#else
+    pid_t sid = setsid();
+    if (sid < 0) return Value(-1L);
+    return Value(static_cast<long>(sid));
+#endif
+}
+
+static int priority_kind_from_value(const Value &v) {
+    if (v.type == ObjectType::INTEGER) return static_cast<int>(v.data.integer);
+    if (v.type == ObjectType::FLOAT) return static_cast<int>(v.data.floating);
+    std::string kind = value_to_string(v);
+    if (kind == "process") return PRIO_PROCESS;
+    if (kind == "pgrp") return PRIO_PGRP;
+    if (kind == "user") return PRIO_USER;
+    throw std::runtime_error("os.priority kind must be 'process', 'pgrp', or 'user'.");
+}
+
+Value builtin_os_nice(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.nice(delta) expects 1 argument.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(-1L);
+#else
+    int inc = static_cast<int>(value_to_long(args[0]));
+    errno = 0;
+    int rc = nice(inc);
+    if (rc == -1 && errno != 0) return Value(-1L);
+    return Value(static_cast<long>(rc));
+#endif
+}
+
+Value builtin_os_getpriority(const std::vector<Value> &args) {
+    if (args.size() > 2) {
+        throw std::runtime_error("os.getpriority(kind='process', id=0) expects 0 to 2 arguments.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(-1L);
+#else
+    int which = args.empty() ? PRIO_PROCESS : priority_kind_from_value(args[0]);
+    int id = args.size() == 2 ? static_cast<int>(value_to_long(args[1])) : 0;
+    errno = 0;
+    int prio = getpriority(which, id);
+    if (prio == -1 && errno != 0) return Value(-1L);
+    return Value(static_cast<long>(prio));
+#endif
+}
+
+Value builtin_os_setpriority(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 3) {
+        throw std::runtime_error("os.setpriority(kind='process', id=0, prio) expects 1 to 3 arguments.");
+    }
+#ifdef _WIN32
+    (void)args;
+    return Value(false);
+#else
+    int which = PRIO_PROCESS;
+    int id = 0;
+    int prio = 0;
+    if (args.size() == 1) {
+        prio = static_cast<int>(value_to_long(args[0]));
+    } else if (args.size() == 2) {
+        which = priority_kind_from_value(args[0]);
+        prio = static_cast<int>(value_to_long(args[1]));
+    } else {
+        which = priority_kind_from_value(args[0]);
+        id = static_cast<int>(value_to_long(args[1]));
+        prio = static_cast<int>(value_to_long(args[2]));
+    }
+    int rc = setpriority(which, id, prio);
+    return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_uid_name(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.uid_name(uid) expects 1 argument.");
+    }
+#ifdef _WIN32
+    return Value("");
+#else
+    uid_t uid = static_cast<uid_t>(value_to_long(args[0]));
+    struct passwd *pw = getpwuid(uid);
+    if (pw && pw->pw_name) return Value(std::string(pw->pw_name));
+    return Value("");
+#endif
+}
+
+Value builtin_os_gid_name(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.gid_name(gid) expects 1 argument.");
+    }
+#ifdef _WIN32
+    return Value("");
+#else
+    gid_t gid = static_cast<gid_t>(value_to_long(args[0]));
+    struct group *gr = getgrgid(gid);
+    if (gr && gr->gr_name) return Value(std::string(gr->gr_name));
+    return Value("");
+#endif
+}
+
+Value builtin_os_getpwnam(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.getpwnam(name) expects 1 argument.");
+    }
+#ifdef _WIN32
+    Value result(ObjectType::MAP);
+    result.data.map["name"] = Value("");
+    result.data.map["uid"] = Value(0L);
+    result.data.map["gid"] = Value(0L);
+    result.data.map["dir"] = Value("");
+    result.data.map["shell"] = Value("");
+    return result;
+#else
+    std::string name = value_to_string(args[0]);
+    struct passwd *pw = getpwnam(name.c_str());
+    if (!pw) return Value();
+    Value result(ObjectType::MAP);
+    result.data.map["name"] = Value(std::string(pw->pw_name));
+    result.data.map["uid"] = Value(static_cast<long>(pw->pw_uid));
+    result.data.map["gid"] = Value(static_cast<long>(pw->pw_gid));
+    result.data.map["dir"] = Value(std::string(pw->pw_dir ? pw->pw_dir : ""));
+    result.data.map["shell"] = Value(std::string(pw->pw_shell ? pw->pw_shell : ""));
+    return result;
+#endif
+}
+
+Value builtin_os_getgrnam(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.getgrnam(name) expects 1 argument.");
+    }
+#ifdef _WIN32
+    Value result(ObjectType::MAP);
+    result.data.map["name"] = Value("");
+    result.data.map["gid"] = Value(0L);
+    Value members(ObjectType::LIST);
+    result.data.map["members"] = members;
+    return result;
+#else
+    std::string name = value_to_string(args[0]);
+    struct group *gr = getgrnam(name.c_str());
+    if (!gr) return Value();
+    Value result(ObjectType::MAP);
+    result.data.map["name"] = Value(std::string(gr->gr_name));
+    result.data.map["gid"] = Value(static_cast<long>(gr->gr_gid));
+    Value members(ObjectType::LIST);
+    if (gr->gr_mem) {
+        for (char **m = gr->gr_mem; *m; ++m) {
+            members.data.list.push_back(Value(std::string(*m)));
+        }
+    }
+    result.data.map["members"] = members;
+    return result;
+#endif
+}
+
+Value builtin_os_getlogin(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.getlogin() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    char name_buf[UNLEN + 1];
+    DWORD size = UNLEN + 1;
+    if (GetUserNameA(name_buf, &size)) return Value(std::string(name_buf));
+    return Value("");
+#else
+    const char *name = getlogin();
+    if (name) return Value(std::string(name));
+    return Value("");
+#endif
+}
+
+Value builtin_os_getgroups(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.getgroups() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+#ifdef _WIN32
+    return result;
+#else
+    int count = getgroups(0, nullptr);
+    if (count <= 0) return result;
+    std::vector<gid_t> gids(static_cast<size_t>(count));
+    if (getgroups(count, gids.data()) < 0) return result;
+    for (gid_t gid : gids) {
+        result.data.list.push_back(Value(static_cast<long>(gid)));
+    }
+    return result;
+#endif
+}
+
+Value builtin_os_chflags(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.chflags(path, flags) expects 2 arguments.");
+    }
+    std::string path = value_to_string(args[0]);
+    long flags = value_to_long(args[1]);
+#if defined(__APPLE__)
+    int rc = chflags(path.c_str(), static_cast<u_int>(flags));
+    return Value(rc == 0);
+#else
+    (void)path;
+    (void)flags;
+    return Value(false);
+#endif
+}
+
+Value builtin_os_loadavg(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.loadavg() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+    double loads[3] = {0.0, 0.0, 0.0};
+#ifdef _WIN32
+    result.data.list.push_back(Value(0.0));
+    result.data.list.push_back(Value(0.0));
+    result.data.list.push_back(Value(0.0));
+    return result;
+#else
+    if (getloadavg(loads, 3) == -1) return result;
+    result.data.list.push_back(Value(loads[0]));
+    result.data.list.push_back(Value(loads[1]));
+    result.data.list.push_back(Value(loads[2]));
+    return result;
+#endif
+}
+
+Value builtin_os_cpu_info(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.cpu_info() expects 0 arguments.");
+    }
+    Value result(ObjectType::MAP);
+    unsigned int count = std::thread::hardware_concurrency();
+    if (count == 0) count = 1;
+    result.data.map["count"] = Value(static_cast<long>(count));
+
+#ifdef __APPLE__
+    char brand[256];
+    size_t len = sizeof(brand);
+    if (sysctlbyname("machdep.cpu.brand_string", &brand, &len, nullptr, 0) == 0) {
+        result.data.map["model"] = Value(std::string(brand));
+    } else {
+        result.data.map["model"] = Value("");
+    }
+#elif __linux__
+    std::ifstream cpuinfo("/proc/cpuinfo");
+    std::string line;
+    std::string model;
+    while (std::getline(cpuinfo, line)) {
+        if (line.find("model name") == 0) {
+            size_t pos = line.find(':');
+            if (pos != std::string::npos) {
+                model = line.substr(pos + 1);
+                if (!model.empty() && model[0] == ' ') model.erase(0, model.find_first_not_of(' '));
+                break;
+            }
+        }
+    }
+    result.data.map["model"] = Value(model);
+#else
+    result.data.map["model"] = Value("");
+#endif
+    return result;
+}
+
+Value builtin_os_os_release(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.os_release() expects 0 arguments.");
+    }
+    Value result(ObjectType::MAP);
+#ifdef _WIN32
+    OSVERSIONINFOEXA info;
+    ZeroMemory(&info, sizeof(info));
+    info.dwOSVersionInfoSize = sizeof(info);
+    if (GetVersionExA((OSVERSIONINFOA*)&info)) {
+        result.data.map["name"] = Value("windows");
+        result.data.map["version"] = Value(std::to_string(info.dwMajorVersion) + "." + std::to_string(info.dwMinorVersion));
+        result.data.map["build"] = Value(static_cast<long>(info.dwBuildNumber));
+    }
+    return result;
+#elif __APPLE__
+    struct utsname u;
+    if (uname(&u) == 0) {
+        result.data.map["name"] = Value(std::string(u.sysname));
+        result.data.map["release"] = Value(std::string(u.release));
+        result.data.map["version"] = Value(std::string(u.version));
+        result.data.map["machine"] = Value(std::string(u.machine));
+    }
+    char ver[256];
+    size_t len = sizeof(ver);
+    if (sysctlbyname("kern.osproductversion", &ver, &len, nullptr, 0) == 0) {
+        result.data.map["product_version"] = Value(std::string(ver));
+    }
+    return result;
+#else
+    struct utsname u;
+    if (uname(&u) == 0) {
+        result.data.map["name"] = Value(std::string(u.sysname));
+        result.data.map["release"] = Value(std::string(u.release));
+        result.data.map["version"] = Value(std::string(u.version));
+        result.data.map["machine"] = Value(std::string(u.machine));
+    }
+    std::ifstream osrel("/etc/os-release");
+    std::string line;
+    while (std::getline(osrel, line)) {
+        size_t pos = line.find('=');
+        if (pos == std::string::npos) continue;
+        std::string key = line.substr(0, pos);
+        std::string val = line.substr(pos + 1);
+        if (!val.empty() && val.front() == '"' && val.back() == '"') {
+            val = val.substr(1, val.size() - 2);
+        }
+        result.data.map[key] = Value(val);
+    }
+    return result;
+#endif
+}
+
+Value builtin_os_boot_time(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.boot_time() expects 0 arguments.");
+    }
+#ifdef _WIN32
+    ULONGLONG ms = GetTickCount64();
+    time_t now = time(nullptr);
+    time_t boot = now - static_cast<time_t>(ms / 1000);
+    return Value(static_cast<long>(boot));
+#elif __linux__
+    struct sysinfo info;
+    if (sysinfo(&info) != 0) return Value(0L);
+    time_t now = time(nullptr);
+    return Value(static_cast<long>(now - info.uptime));
+#elif __APPLE__
+    struct timeval boottime;
+    size_t len = sizeof(boottime);
+    int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+    if (sysctl(mib, 2, &boottime, &len, nullptr, 0) == 0) {
+        return Value(static_cast<long>(boottime.tv_sec));
+    }
+    return Value(0L);
+#else
+    return Value(0L);
+#endif
+}
+
+Value builtin_os_locale(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.locale() expects 0 arguments.");
+    }
+    const char *loc = setlocale(LC_ALL, nullptr);
+    if (!loc) return Value("");
+    return Value(std::string(loc));
+}
+
+Value builtin_os_timezone(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.timezone() expects 0 arguments.");
+    }
+    Value result(ObjectType::MAP);
+#ifdef _WIN32
+    _tzset();
+    long offset = 0;
+    _get_timezone(&offset);
+    char **names = _tzname;
+    result.data.map["name"] = Value(std::string(names && names[0] ? names[0] : ""));
+    result.data.map["offset"] = Value(static_cast<long>(-offset));
+#else
+    tzset();
+    result.data.map["name"] = Value(std::string(tzname[0] ? tzname[0] : ""));
+    result.data.map["offset"] = Value(static_cast<long>(-timezone));
+#endif
+    return result;
+}
+
+Value builtin_os_mounts(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.mounts() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+#ifdef _WIN32
+    DWORD size = GetLogicalDriveStringsA(0, nullptr);
+    if (size == 0) return result;
+    std::string buffer(size + 1, '\0');
+    GetLogicalDriveStringsA(size, &buffer[0]);
+    for (size_t i = 0; i < buffer.size();) {
+        std::string drive(&buffer[i]);
+        if (drive.empty()) break;
+        Value entry(ObjectType::MAP);
+        entry.data.map["mount"] = Value(drive);
+        entry.data.map["type"] = Value("drive");
+        result.data.list.push_back(entry);
+        i += drive.size() + 1;
+    }
+    return result;
+#elif __APPLE__
+    struct statfs *mnts = nullptr;
+    int count = getmntinfo(&mnts, MNT_NOWAIT);
+    if (count <= 0) return result;
+    for (int i = 0; i < count; ++i) {
+        Value entry(ObjectType::MAP);
+        entry.data.map["mount"] = Value(std::string(mnts[i].f_mntonname));
+        entry.data.map["device"] = Value(std::string(mnts[i].f_mntfromname));
+        entry.data.map["fstype"] = Value(std::string(mnts[i].f_fstypename));
+        result.data.list.push_back(entry);
+    }
+    return result;
+#else
+    std::ifstream mounts("/proc/mounts");
+    std::string line;
+    while (std::getline(mounts, line)) {
+        std::istringstream iss(line);
+        std::string device;
+        std::string mountpoint;
+        std::string fstype;
+        if (!(iss >> device >> mountpoint >> fstype)) continue;
+        Value entry(ObjectType::MAP);
+        entry.data.map["mount"] = Value(mountpoint);
+        entry.data.map["device"] = Value(device);
+        entry.data.map["fstype"] = Value(fstype);
+        result.data.list.push_back(entry);
+    }
+    return result;
+#endif
+}
+
+Value builtin_os_service_control(const std::vector<Value> &args) {
+    if (args.size() != 2) {
+        throw std::runtime_error("os.service_control(action, name) expects 2 arguments.");
+    }
+    std::string action = value_to_string(args[0]);
+    std::string name = value_to_string(args[1]);
+#ifdef _WIN32
+    std::string cmd = "sc " + action + " \"" + name + "\"";
+    int rc = std::system(cmd.c_str());
+    return Value(rc == 0);
+#else
+    (void)action;
+    (void)name;
+    return Value(false);
+#endif
+}
+
+Value builtin_os_service_query(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.service_query(name) expects 1 argument.");
+    }
+    std::string name = value_to_string(args[0]);
+    Value result(ObjectType::MAP);
+#ifdef _WIN32
+    std::string cmd = "sc query \"" + name + "\"";
+    FILE *pipe = _popen(cmd.c_str(), "r");
+    if (!pipe) return result;
+    char buf[512];
+    std::string state;
+    long code = 0;
+    while (fgets(buf, sizeof(buf), pipe)) {
+        std::string line(buf);
+        size_t pos = line.find("STATE");
+        if (pos != std::string::npos) {
+            size_t colon = line.find(':', pos);
+            if (colon != std::string::npos) {
+                std::string rest = line.substr(colon + 1);
+                std::istringstream iss(rest);
+                iss >> code >> state;
+            }
+        }
+    }
+    _pclose(pipe);
+    result.data.map["state"] = Value(state);
+    result.data.map["code"] = Value(code);
+    return result;
+#else
+    (void)name;
+    return result;
+#endif
+}
+
+Value builtin_os_battery_info(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.battery_info() expects 0 arguments.");
+    }
+    Value result(ObjectType::MAP);
+#ifdef __APPLE__
+    FILE *pipe = popen("pmset -g batt", "r");
+    if (!pipe) return result;
+    char buf[512];
+    std::string source;
+    std::string state;
+    int percent = -1;
+    while (fgets(buf, sizeof(buf), pipe)) {
+        std::string line(buf);
+        size_t src = line.find("Now drawing from");
+        if (src != std::string::npos) {
+            size_t q1 = line.find('\'', src);
+            size_t q2 = line.find('\'', q1 + 1);
+            if (q1 != std::string::npos && q2 != std::string::npos) {
+                source = line.substr(q1 + 1, q2 - q1 - 1);
+            }
+        }
+        size_t pct = line.find('%');
+        if (pct != std::string::npos) {
+            size_t start = line.rfind(' ', pct);
+            if (start == std::string::npos) start = 0;
+            std::string num = line.substr(start, pct - start);
+            percent = std::atoi(num.c_str());
+            if (line.find("charging") != std::string::npos) state = "charging";
+            else if (line.find("discharging") != std::string::npos) state = "discharging";
+            else if (line.find("charged") != std::string::npos) state = "charged";
+        }
+    }
+    pclose(pipe);
+    result.data.map["source"] = Value(source);
+    result.data.map["state"] = Value(state);
+    result.data.map["percent"] = Value(static_cast<long>(percent));
+    return result;
+#else
+    return result;
+#endif
+}
+
+Value builtin_os_cgroups(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.cgroups() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+#ifdef __linux__
+    std::ifstream in("/proc/self/cgroup");
+    std::string line;
+    while (std::getline(in, line)) {
+        size_t a = line.find(':');
+        size_t b = line.find(':', a + 1);
+        if (a == std::string::npos || b == std::string::npos) continue;
+        std::string id = line.substr(0, a);
+        std::string controllers = line.substr(a + 1, b - a - 1);
+        std::string path = line.substr(b + 1);
+        Value entry(ObjectType::MAP);
+        entry.data.map["id"] = Value(id);
+        Value ctrls(ObjectType::LIST);
+        std::stringstream ss(controllers);
+        std::string item;
+        while (std::getline(ss, item, ',')) {
+            if (!item.empty()) ctrls.data.list.push_back(Value(item));
+        }
+        entry.data.map["controllers"] = ctrls;
+        entry.data.map["path"] = Value(path);
+        result.data.list.push_back(entry);
+    }
+    return result;
+#else
+    return result;
+#endif
+}
+
+Value builtin_os_namespaces(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.namespaces() expects 0 arguments.");
+    }
+    Value result(ObjectType::MAP);
+#ifdef __linux__
+    fs::path nsdir("/proc/self/ns");
+    std::error_code ec;
+    for (const auto &entry : fs::directory_iterator(nsdir, ec)) {
+        if (ec) break;
+        std::string name = entry.path().filename().string();
+        char buf[256];
+        ssize_t n = readlink(entry.path().c_str(), buf, sizeof(buf) - 1);
+        if (n > 0) {
+            buf[n] = '\0';
+            result.data.map[name] = Value(std::string(buf));
+        }
+    }
+    return result;
+#else
+    return result;
+#endif
+}
+
+Value builtin_os_ps(const std::vector<Value> &args) {
+    if (!args.empty()) {
+        throw std::runtime_error("os.ps() expects 0 arguments.");
+    }
+    Value result(ObjectType::LIST);
+#ifdef _WIN32
+    HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE) return result;
+    PROCESSENTRY32 pe;
+    pe.dwSize = sizeof(PROCESSENTRY32);
+    if (Process32First(snap, &pe)) {
+        do {
+            Value entry(ObjectType::MAP);
+            entry.data.map["pid"] = Value(static_cast<long>(pe.th32ProcessID));
+            entry.data.map["ppid"] = Value(static_cast<long>(pe.th32ParentProcessID));
+            entry.data.map["name"] = Value(std::string(pe.szExeFile));
+            result.data.list.push_back(entry);
+        } while (Process32Next(snap, &pe));
+    }
+    CloseHandle(snap);
+    return result;
+#else
+    FILE *fp = popen("ps -ax -o pid=,ppid=,comm=", "r");
+    if (!fp) return result;
+    char buf[1024];
+    while (fgets(buf, sizeof(buf), fp)) {
+        std::string line(buf);
+        std::istringstream iss(line);
+        long pid = 0;
+        long ppid = 0;
+        std::string name;
+        if (!(iss >> pid >> ppid)) continue;
+        std::getline(iss, name);
+        if (!name.empty() && name[0] == ' ') name.erase(0, name.find_first_not_of(' '));
+        Value entry(ObjectType::MAP);
+        entry.data.map["pid"] = Value(pid);
+        entry.data.map["ppid"] = Value(ppid);
+        entry.data.map["name"] = Value(name);
+        result.data.list.push_back(entry);
+    }
+    pclose(fp);
+    return result;
+#endif
+}
+
+Value builtin_os_run(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 3) {
+        throw std::runtime_error("os.run(cmd, args=[], timeout_ms=0) expects 1 to 3 arguments.");
+    }
+    std::string cmd = value_to_string(args[0]);
+    std::vector<std::string> argv;
+    if (args.size() >= 2 && args[1].type != ObjectType::NONE) argv = value_to_string_list(args[1]);
+    long timeout_ms = args.size() == 3 ? value_to_long(args[2]) : 0;
+    if (timeout_ms < 0) timeout_ms = 0;
+
+#ifdef _WIN32
+    std::string cmdline = quote_arg(cmd);
+    for (const auto &a : argv) cmdline += " " + quote_arg(a);
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+    BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
+    if (!ok) return Value(-1L);
+    DWORD wait_ms = timeout_ms == 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
+    DWORD wait_rc = WaitForSingleObject(pi.hProcess, wait_ms);
+    if (wait_rc == WAIT_TIMEOUT) {
+        TerminateProcess(pi.hProcess, 1);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        return Value(-1L);
+    }
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return Value(static_cast<long>(exit_code));
+#else
+    pid_t pid = fork();
+    if (pid == 0) {
+        std::vector<char*> cargs;
+        cargs.reserve(argv.size() + 2);
+        cargs.push_back(const_cast<char*>(cmd.c_str()));
+        for (auto &a : argv) cargs.push_back(const_cast<char*>(a.c_str()));
+        cargs.push_back(nullptr);
+        execvp(cmd.c_str(), cargs.data());
+        _exit(127);
+    }
+    if (pid < 0) return Value(-1L);
+
+    int status = 0;
+    if (timeout_ms == 0) {
+        if (waitpid(pid, &status, 0) < 0) return Value(-1L);
+    } else {
+        auto start = std::chrono::steady_clock::now();
+        while (true) {
+            pid_t rc = waitpid(pid, &status, WNOHANG);
+            if (rc == pid) break;
+            if (rc < 0) return Value(-1L);
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= timeout_ms) {
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                return Value(-1L);
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    if (WIFEXITED(status)) return Value(static_cast<long>(WEXITSTATUS(status)));
+    return Value(-1L);
+#endif
+}
+
+Value builtin_os_waitpid(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.waitpid(pid, nohang=false) expects 1 or 2 arguments.");
+    }
+    long pid_val = value_to_long(args[0]);
+    bool nohang = args.size() == 2 ? value_to_bool(args[1]) : false;
+    Value result(ObjectType::MAP);
+    result.data.map["pid"] = Value(pid_val);
+#ifdef _WIN32
+    (void)nohang;
+    result.data.map["exited"] = Value(false);
+    result.data.map["code"] = Value(-1L);
+    result.data.map["signaled"] = Value(false);
+    result.data.map["signal"] = Value(0L);
+    return result;
+#else
+    int status = 0;
+    int options = nohang ? WNOHANG : 0;
+    pid_t rc = waitpid(static_cast<pid_t>(pid_val), &status, options);
+    if (rc == 0) {
+        result.data.map["pid"] = Value(0L);
+        result.data.map["exited"] = Value(false);
+        result.data.map["code"] = Value(-1L);
+        result.data.map["signaled"] = Value(false);
+        result.data.map["signal"] = Value(0L);
+        return result;
+    }
+    if (rc < 0) {
+        result.data.map["exited"] = Value(false);
+        result.data.map["code"] = Value(-1L);
+        result.data.map["signaled"] = Value(false);
+        result.data.map["signal"] = Value(0L);
+        return result;
+    }
+    result.data.map["pid"] = Value(static_cast<long>(rc));
+    result.data.map["exited"] = Value(WIFEXITED(status) != 0);
+    result.data.map["code"] = Value(WIFEXITED(status) ? static_cast<long>(WEXITSTATUS(status)) : -1L);
+    result.data.map["signaled"] = Value(WIFSIGNALED(status) != 0);
+    result.data.map["signal"] = Value(WIFSIGNALED(status) ? static_cast<long>(WTERMSIG(status)) : 0L);
+    return result;
+#endif
+}
+
+Value builtin_os_kill_tree(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.kill_tree(pid, signal=9) expects 1 or 2 arguments.");
+    }
+    long pid = value_to_long(args[0]);
+    long sig = args.size() == 2 ? value_to_long(args[1]) : 9;
+#ifdef _WIN32
+    std::string cmd = "taskkill /T /PID " + std::to_string(pid);
+    if (sig == 9) cmd += " /F";
+    bool ok = run_command_chain({cmd.c_str()});
+    return Value(ok);
+#else
+    int rc = kill(static_cast<pid_t>(pid), static_cast<int>(sig));
+    std::string cmd = "pkill -P " + std::to_string(pid);
+    run_command_chain({cmd.c_str()});
+    return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_run_capture(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 4) {
+        throw std::runtime_error("os.run_capture(cmd, args=[], timeout_ms=0, input='') expects 1 to 4 arguments.");
+    }
+    std::string cmd = value_to_string(args[0]);
+    std::vector<std::string> argv;
+    if (args.size() >= 2 && args[1].type != ObjectType::NONE) argv = value_to_string_list(args[1]);
+    long timeout_ms = args.size() >= 3 ? value_to_long(args[2]) : 0;
+    if (timeout_ms < 0) timeout_ms = 0;
+    std::string input = args.size() == 4 ? value_to_string(args[3]) : std::string();
+
+    Value result(ObjectType::MAP);
+    result.data.map["stdout"] = Value("");
+    result.data.map["stderr"] = Value("");
+    result.data.map["code"] = Value(-1L);
+    result.data.map["timed_out"] = Value(false);
+
+#ifdef _WIN32
+    SECURITY_ATTRIBUTES sa;
+    sa.nLength = sizeof(sa);
+    sa.bInheritHandle = TRUE;
+    sa.lpSecurityDescriptor = nullptr;
+
+    HANDLE stdin_read = nullptr;
+    HANDLE stdin_write = nullptr;
+    HANDLE stdout_read = nullptr;
+    HANDLE stdout_write = nullptr;
+    HANDLE stderr_read = nullptr;
+    HANDLE stderr_write = nullptr;
+
+    if (!CreatePipe(&stdin_read, &stdin_write, &sa, 0)) return result;
+    if (!CreatePipe(&stdout_read, &stdout_write, &sa, 0)) return result;
+    if (!CreatePipe(&stderr_read, &stderr_write, &sa, 0)) return result;
+
+    SetHandleInformation(stdin_write, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stdout_read, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(stderr_read, HANDLE_FLAG_INHERIT, 0);
+
+    std::string cmdline = quote_arg(cmd);
+    for (const auto &a : argv) cmdline += " " + quote_arg(a);
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = stdin_read;
+    si.hStdOutput = stdout_write;
+    si.hStdError = stderr_write;
+
+    BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi);
+    CloseHandle(stdin_read);
+    CloseHandle(stdout_write);
+    CloseHandle(stderr_write);
+    if (!ok) {
+        CloseHandle(stdin_write);
+        CloseHandle(stdout_read);
+        CloseHandle(stderr_read);
+        return result;
+    }
+
+    if (!input.empty()) {
+        DWORD written = 0;
+        WriteFile(stdin_write, input.data(), static_cast<DWORD>(input.size()), &written, nullptr);
+    }
+    CloseHandle(stdin_write);
+
+    std::string out_buf;
+    std::string err_buf;
+    std::thread out_thread([&]() { out_buf = read_all_from_handle(stdout_read); });
+    std::thread err_thread([&]() { err_buf = read_all_from_handle(stderr_read); });
+
+    DWORD wait_ms = timeout_ms == 0 ? INFINITE : static_cast<DWORD>(timeout_ms);
+    DWORD wait_rc = WaitForSingleObject(pi.hProcess, wait_ms);
+    if (wait_rc == WAIT_TIMEOUT) {
+        result.data.map["timed_out"] = Value(true);
+        TerminateProcess(pi.hProcess, 1);
+    }
+    DWORD exit_code = 0;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    CloseHandle(stdout_read);
+    CloseHandle(stderr_read);
+    out_thread.join();
+    err_thread.join();
+
+    result.data.map["stdout"] = Value(out_buf);
+    result.data.map["stderr"] = Value(err_buf);
+    result.data.map["code"] = Value(static_cast<long>(exit_code));
+    return result;
+#else
+    int in_pipe[2];
+    int out_pipe[2];
+    int err_pipe[2];
+    if (pipe(in_pipe) != 0) return result;
+    if (pipe(out_pipe) != 0) return result;
+    if (pipe(err_pipe) != 0) return result;
+
+    pid_t pid = fork();
+    if (pid == 0) {
+        dup2(in_pipe[0], STDIN_FILENO);
+        dup2(out_pipe[1], STDOUT_FILENO);
+        dup2(err_pipe[1], STDERR_FILENO);
+        close(in_pipe[1]);
+        close(out_pipe[0]);
+        close(err_pipe[0]);
+
+        std::vector<char*> cargs;
+        cargs.reserve(argv.size() + 2);
+        cargs.push_back(const_cast<char*>(cmd.c_str()));
+        for (auto &a : argv) cargs.push_back(const_cast<char*>(a.c_str()));
+        cargs.push_back(nullptr);
+        execvp(cmd.c_str(), cargs.data());
+        _exit(127);
+    }
+    if (pid < 0) return result;
+
+    close(in_pipe[0]);
+    close(out_pipe[1]);
+    close(err_pipe[1]);
+
+    if (!input.empty()) {
+        ssize_t written = write(in_pipe[1], input.data(), input.size());
+        (void)written;
+    }
+    close(in_pipe[1]);
+
+    std::string out_buf;
+    std::string err_buf;
+    std::thread out_thread([&]() { out_buf = read_all_from_fd(out_pipe[0]); });
+    std::thread err_thread([&]() { err_buf = read_all_from_fd(err_pipe[0]); });
+
+    int status = 0;
+    if (timeout_ms == 0) {
+        waitpid(pid, &status, 0);
+    } else {
+        auto start = std::chrono::steady_clock::now();
+        while (true) {
+            pid_t rc = waitpid(pid, &status, WNOHANG);
+            if (rc == pid) break;
+            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - start).count();
+            if (elapsed >= timeout_ms) {
+                result.data.map["timed_out"] = Value(true);
+                kill(pid, SIGKILL);
+                waitpid(pid, &status, 0);
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+    }
+
+    close(out_pipe[0]);
+    close(err_pipe[0]);
+    out_thread.join();
+    err_thread.join();
+
+    result.data.map["stdout"] = Value(out_buf);
+    result.data.map["stderr"] = Value(err_buf);
+    if (WIFEXITED(status)) result.data.map["code"] = Value(static_cast<long>(WEXITSTATUS(status)));
+    return result;
+#endif
+}
+
+Value builtin_os_popen(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 3) {
+        throw std::runtime_error("os.popen(cmd, args=[], input='') expects 1 to 3 arguments.");
+    }
+    std::vector<Value> capture_args;
+    capture_args.push_back(args[0]);
+    if (args.size() >= 2) capture_args.push_back(args[1]);
+    else capture_args.push_back(Value(ObjectType::NONE));
+    capture_args.push_back(Value(0L));
+    if (args.size() == 3) capture_args.push_back(args[2]);
+    Value capture = builtin_os_run_capture(capture_args);
+    if (capture.type != ObjectType::MAP) return Value("");
+    auto it = capture.data.map.find("stdout");
+    if (it == capture.data.map.end()) return Value("");
+    return it->second;
+}
+
+Value builtin_os_spawn_io(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 6) {
+        throw std::runtime_error("os.spawn_io(cmd, args=[], stdin_path='', stdout_path='', stderr_path='', append=false) expects 1 to 6 arguments.");
+    }
+    std::string cmd = value_to_string(args[0]);
+    std::vector<std::string> argv;
+    if (args.size() >= 2 && args[1].type != ObjectType::NONE) argv = value_to_string_list(args[1]);
+    std::string stdin_path = args.size() >= 3 ? value_to_string(args[2]) : std::string();
+    std::string stdout_path = args.size() >= 4 ? value_to_string(args[3]) : std::string();
+    std::string stderr_path = args.size() >= 5 ? value_to_string(args[4]) : std::string();
+    bool append = args.size() == 6 ? value_to_bool(args[5]) : false;
+
+#ifdef _WIN32
+    HANDLE h_stdin = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE h_stdout = GetStdHandle(STD_OUTPUT_HANDLE);
+    HANDLE h_stderr = GetStdHandle(STD_ERROR_HANDLE);
+
+    if (!stdin_path.empty()) {
+        h_stdin = CreateFileA(stdin_path.c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    DWORD out_mode = append ? FILE_APPEND_DATA : GENERIC_WRITE;
+    DWORD out_create = append ? OPEN_ALWAYS : CREATE_ALWAYS;
+    if (!stdout_path.empty()) {
+        h_stdout = CreateFileA(stdout_path.c_str(), out_mode, FILE_SHARE_READ, nullptr, out_create, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+    if (!stderr_path.empty()) {
+        h_stderr = CreateFileA(stderr_path.c_str(), out_mode, FILE_SHARE_READ, nullptr, out_create, FILE_ATTRIBUTE_NORMAL, nullptr);
+    }
+
+    std::string cmdline = quote_arg(cmd);
+    for (const auto &a : argv) cmdline += " " + quote_arg(a);
+
+    STARTUPINFOA si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof(si));
+    ZeroMemory(&pi, sizeof(pi));
+    si.cb = sizeof(si);
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdInput = h_stdin;
+    si.hStdOutput = h_stdout;
+    si.hStdError = h_stderr;
+
+    BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, TRUE, 0, nullptr, nullptr, &si, &pi);
+    if (!ok) return Value(-1L);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return Value(static_cast<long>(pi.dwProcessId));
+#else
+    pid_t pid = fork();
+    if (pid == 0) {
+        if (!stdin_path.empty()) {
+            int fd = open(stdin_path.c_str(), O_RDONLY);
+            if (fd >= 0) { dup2(fd, STDIN_FILENO); close(fd); }
+        }
+        int out_flags = append ? (O_WRONLY | O_CREAT | O_APPEND) : (O_WRONLY | O_CREAT | O_TRUNC);
+        if (!stdout_path.empty()) {
+            int fd = open(stdout_path.c_str(), out_flags, 0666);
+            if (fd >= 0) { dup2(fd, STDOUT_FILENO); close(fd); }
+        }
+        if (!stderr_path.empty()) {
+            int fd = open(stderr_path.c_str(), out_flags, 0666);
+            if (fd >= 0) { dup2(fd, STDERR_FILENO); close(fd); }
+        }
+        std::vector<char*> cargs;
+        cargs.reserve(argv.size() + 2);
+        cargs.push_back(const_cast<char*>(cmd.c_str()));
+        for (auto &a : argv) cargs.push_back(const_cast<char*>(a.c_str()));
+        cargs.push_back(nullptr);
+        execvp(cmd.c_str(), cargs.data());
+        _exit(127);
+    }
+    if (pid < 0) return Value(-1L);
+    return Value(static_cast<long>(pid));
+#endif
+}
+
+Value builtin_os_shutdown(const std::vector<Value> &args) {
+  if (args.size() > 2) {
+    throw std::runtime_error("os.shutdown(force=false, delay=0) expects 0 to 2 arguments.");
+  }
+  bool force = args.size() >= 1 ? value_to_bool(args[0]) : false;
+  long delay = args.size() == 2 ? value_to_long(args[1]) : 0;
+  if (delay < 0) delay = 0;
+  bool ok = false;
+#ifdef _WIN32
+  std::string cmd = "shutdown /s /t " + std::to_string(delay);
+  if (force) cmd += " /f";
+  ok = run_command_chain({cmd.c_str()});
+#elif __APPLE__
+  if (delay == 0) {
+    ok = run_command_chain({"shutdown -h now"});
+  } else {
+    long minutes = (delay + 59) / 60;
+    std::string cmd = "shutdown -h +" + std::to_string(minutes);
+    ok = run_command_chain({cmd.c_str()});
+  }
+#elif __linux__
+  if (delay == 0) {
+    ok = run_command_chain({"shutdown -h now", "poweroff", "systemctl poweroff"});
+  } else {
+    long minutes = (delay + 59) / 60;
+    std::string cmd = "shutdown -h +" + std::to_string(minutes);
+    ok = run_command_chain({cmd.c_str(), "poweroff", "systemctl poweroff"});
+  }
+#else
+  ok = run_command_chain({"shutdown -h now"});
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_restart(const std::vector<Value> &args) {
+  if (args.size() > 2) {
+    throw std::runtime_error("os.restart(force=false, delay=0) expects 0 to 2 arguments.");
+  }
+  bool force = args.size() >= 1 ? value_to_bool(args[0]) : false;
+  long delay = args.size() == 2 ? value_to_long(args[1]) : 0;
+  if (delay < 0) delay = 0;
+  bool ok = false;
+#ifdef _WIN32
+  std::string cmd = "shutdown /r /t " + std::to_string(delay);
+  if (force) cmd += " /f";
+  ok = run_command_chain({cmd.c_str()});
+#elif __APPLE__
+  if (delay == 0) {
+    ok = run_command_chain({"shutdown -r now"});
+  } else {
+    long minutes = (delay + 59) / 60;
+    std::string cmd = "shutdown -r +" + std::to_string(minutes);
+    ok = run_command_chain({cmd.c_str()});
+  }
+#elif __linux__
+  if (delay == 0) {
+    ok = run_command_chain({"shutdown -r now", "reboot", "systemctl reboot"});
+  } else {
+    long minutes = (delay + 59) / 60;
+    std::string cmd = "shutdown -r +" + std::to_string(minutes);
+    ok = run_command_chain({cmd.c_str(), "reboot", "systemctl reboot"});
+  }
+#else
+  ok = run_command_chain({"shutdown -r now"});
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_logout(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.logout() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  bool ok = run_command_chain({"shutdown /l"});
+#elif __APPLE__
+  bool ok = run_command_chain({"osascript -e 'tell application \"System Events\" to log out'"});
+#elif __linux__
+  bool ok = run_command_chain({"gnome-session-quit --logout --no-prompt",
+                               "loginctl terminate-session $XDG_SESSION_ID",
+                               "pkill -KILL -u $(whoami)"});
+#else
+  bool ok = false;
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_lock(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.lock() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  bool ok = (LockWorkStation() != 0);
+#elif __APPLE__
+  bool ok = run_command_chain({"pmset displaysleepnow"});
+#elif __linux__
+  bool ok = run_command_chain({"loginctl lock-session",
+                               "gnome-screensaver-command -l",
+                               "xdg-screensaver lock"});
+#else
+  bool ok = false;
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_sleep(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.sleep(seconds) expects 1 argument.");
+  }
+  long seconds = value_to_long(args[0]);
+  if (seconds < 0) seconds = 0;
+  std::this_thread::sleep_for(std::chrono::seconds(seconds));
+  return Value(true);
+}
+
+Value builtin_os_hibernate(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.hibernate() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  bool ok = run_command_chain({"shutdown /h"});
+#elif __APPLE__
+  bool ok = run_command_chain({"pmset sleepnow"});
+#elif __linux__
+  bool ok = run_command_chain({"systemctl hibernate", "pm-hibernate"});
+#else
+  bool ok = false;
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_hostname(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.hostname() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  char name_buf[MAX_COMPUTERNAME_LENGTH + 1];
+  DWORD size = MAX_COMPUTERNAME_LENGTH + 1;
+  if (GetComputerNameA(name_buf, &size)) return Value(std::string(name_buf));
+  return Value("");
+#else
+  char name_buf[256];
+  if (gethostname(name_buf, sizeof(name_buf)) == 0) return Value(std::string(name_buf));
+  return Value("");
+#endif
+}
+
+Value builtin_os_set_hostname(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.set_hostname(name) expects 1 argument.");
+  }
+  std::string name = value_to_string(args[0]);
+#ifdef _WIN32
+  bool ok = (SetComputerNameA(name.c_str()) != 0);
+#else
+  bool ok = (sethostname(name.c_str(), name.size()) == 0);
+#endif
+  return Value(ok);
+}
+
+Value builtin_os_uptime(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.uptime() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  return Value(static_cast<long>(GetTickCount64() / 1000));
+#elif __linux__
+  struct sysinfo info;
+  if (sysinfo(&info) == 0) return Value(static_cast<long>(info.uptime));
+  return Value(0L);
+#elif __APPLE__
+  struct timeval boottime;
+  size_t len = sizeof(boottime);
+  int mib[2] = {CTL_KERN, KERN_BOOTTIME};
+  if (sysctl(mib, 2, &boottime, &len, nullptr, 0) == 0) {
+    time_t now = time(nullptr);
+    return Value(static_cast<long>(now - boottime.tv_sec));
+  }
+  return Value(0L);
+#else
+  return Value(0L);
+#endif
+}
+
+Value builtin_os_cpu_count(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.cpu_count() expects 0 arguments.");
+  }
+  unsigned int count = std::thread::hardware_concurrency();
+  if (count == 0) count = 1;
+  return Value(static_cast<long>(count));
+}
+
+Value builtin_os_mem_total(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.mem_total() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof(status);
+  if (GlobalMemoryStatusEx(&status)) {
+    return Value(static_cast<long>(status.ullTotalPhys));
+  }
+  return Value(0L);
+#elif __linux__
+  struct sysinfo info;
+  if (sysinfo(&info) == 0) {
+    return Value(static_cast<long>(info.totalram * info.mem_unit));
+  }
+  return Value(0L);
+#elif __APPLE__
+  uint64_t memsize = 0;
+  size_t len = sizeof(memsize);
+  if (sysctlbyname("hw.memsize", &memsize, &len, nullptr, 0) == 0) {
+    return Value(static_cast<long>(memsize));
+  }
+  return Value(0L);
+#else
+  return Value(0L);
+#endif
+}
+
+Value builtin_os_mem_free(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.mem_free() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  MEMORYSTATUSEX status;
+  status.dwLength = sizeof(status);
+  if (GlobalMemoryStatusEx(&status)) {
+    return Value(static_cast<long>(status.ullAvailPhys));
+  }
+  return Value(0L);
+#elif __linux__
+  struct sysinfo info;
+  if (sysinfo(&info) == 0) {
+    return Value(static_cast<long>(info.freeram * info.mem_unit));
+  }
+  return Value(0L);
+#elif __APPLE__
+  mach_port_t host = mach_host_self();
+  vm_statistics64_data_t vm_stats;
+  mach_msg_type_number_t count = HOST_VM_INFO64_COUNT;
+  if (host_statistics64(host, HOST_VM_INFO64, (host_info64_t)&vm_stats, &count) == KERN_SUCCESS) {
+    uint64_t free_bytes = static_cast<uint64_t>(vm_stats.free_count + vm_stats.inactive_count);
+    free_bytes *= static_cast<uint64_t>(sysconf(_SC_PAGESIZE));
+    return Value(static_cast<long>(free_bytes));
+  }
+  return Value(0L);
+#else
+  return Value(0L);
+#endif
+}
+
+Value builtin_os_platform(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.platform() expects 0 arguments.");
+  }
+  std::string arch;
+#if defined(_M_X64) || defined(__x86_64__)
+  arch = "x64";
+#elif defined(_M_IX86) || defined(__i386__)
+  arch = "x86";
+#elif defined(__aarch64__) || defined(_M_ARM64)
+  arch = "arm64";
+#elif defined(__arm__) || defined(_M_ARM)
+  arch = "arm";
+#else
+  arch = "unknown";
+#endif
+
+#ifdef _WIN32
+  OSVERSIONINFOEXA info;
+  ZeroMemory(&info, sizeof(info));
+  info.dwOSVersionInfoSize = sizeof(info);
+  std::string ver = "unknown";
+  if (GetVersionExA((OSVERSIONINFOA*)&info)) {
+    ver = std::to_string(info.dwMajorVersion) + "." + std::to_string(info.dwMinorVersion);
+  }
+  return Value("windows-" + arch + "-" + ver);
+#else
+  struct utsname u;
+  if (uname(&u) == 0) {
+    return Value(std::string(u.sysname) + "-" + arch + "-" + u.release);
+  }
+  return Value(get_os_name() + "-" + arch);
+#endif
+}
+
+Value builtin_os_chmod(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.chmod(path, mode) expects 2 arguments.");
+  }
+  std::string path = value_to_string(args[0]);
+    mode_t mode = 0;
+#ifdef _WIN32
+  (void)path;
+    return Value(false);
+#else
+    if (args[1].type == ObjectType::STRING) {
+        std::string spec = value_to_string(args[1]);
+        mode_t current = 0;
+        struct stat st;
+        if (stat(path.c_str(), &st) == 0) current = st.st_mode;
+        if (!parse_octal_mode(spec, mode)) {
+            mode = current;
+            if (!apply_symbolic_mode(spec, mode)) {
+                throw std::runtime_error("Invalid chmod mode string.");
+            }
+        }
+    } else {
+        mode = static_cast<mode_t>(value_to_long(args[1]));
+    }
+    int rc = chmod(path.c_str(), mode);
+  return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_chown(const std::vector<Value> &args) {
+  if (args.size() != 3) {
+    throw std::runtime_error("os.chown(path, uid, gid) expects 3 arguments.");
+  }
+  std::string path = value_to_string(args[0]);
+  long uid = value_to_long(args[1]);
+  long gid = value_to_long(args[2]);
+#ifdef _WIN32
+  (void)path;
+  (void)uid;
+  (void)gid;
+  return Value(false);
+#else
+  int rc = chown(path.c_str(), static_cast<uid_t>(uid), static_cast<gid_t>(gid));
+  return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_stat(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.stat(path) expects 1 argument.");
+  }
+  std::string path = value_to_string(args[0]);
+  struct stat st;
+  if (stat(path.c_str(), &st) != 0) {
+    return Value();
+  }
+    return stat_to_value_map(st, false);
+}
+
+Value builtin_os_realpath(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.realpath(path) expects 1 argument.");
+  }
+  fs::path p(value_to_string(args[0]));
+  return Value(fs::weakly_canonical(p).string());
+}
+
+Value builtin_os_realpath_ex(const std::vector<Value> &args) {
+    if (args.empty() || args.size() > 2) {
+        throw std::runtime_error("os.realpath_ex(path, strict=true) expects 1 or 2 arguments.");
+    }
+    fs::path p(value_to_string(args[0]));
+    bool strict = args.size() == 2 ? value_to_bool(args[1]) : true;
+    std::error_code ec;
+    fs::path out = strict ? fs::canonical(p, ec) : fs::weakly_canonical(p, ec);
+    if (ec) return Value();
+    return Value(out.string());
+}
+
+Value builtin_os_symlink(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.symlink(target, linkpath) expects 2 arguments.");
+  }
+  fs::path target(value_to_string(args[0]));
+  fs::path linkpath(value_to_string(args[1]));
+  std::error_code ec;
+  fs::create_symlink(target, linkpath, ec);
+  return Value(!ec);
+}
+
+Value builtin_os_readlink(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.readlink(path) expects 1 argument.");
+  }
+  fs::path p(value_to_string(args[0]));
+  std::error_code ec;
+  fs::path out = fs::read_symlink(p, ec);
+  if (ec) return Value();
+  return Value(out.string());
+}
+
+Value builtin_os_readlink_info(const std::vector<Value> &args) {
+    if (args.size() != 1) {
+        throw std::runtime_error("os.readlink_info(path) expects 1 argument.");
+    }
+    std::string path = value_to_string(args[0]);
+    Value result(ObjectType::MAP);
+    std::string target;
+#ifdef _WIN32
+    std::error_code ec;
+    fs::path out = fs::read_symlink(fs::path(path), ec);
+    if (!ec) target = out.string();
+#else
+    char buf[4096];
+    ssize_t n = readlink(path.c_str(), buf, sizeof(buf) - 1);
+    if (n > 0) {
+        buf[n] = '\0';
+        target = std::string(buf);
+    }
+#endif
+    result.data.map["target"] = Value(target);
+    Value lstat_val = builtin_os_lstat({Value(path)});
+    result.data.map["lstat"] = lstat_val;
+    return result;
+}
+
+Value builtin_os_copy(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.copy(src, dst) expects 2 arguments.");
+  }
+  fs::path src(value_to_string(args[0]));
+  fs::path dst(value_to_string(args[1]));
+  std::error_code ec;
+  if (fs::is_directory(src, ec)) {
+    fs::copy(src, dst, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+    return Value(!ec);
+  }
+  fs::copy_file(src, dst, fs::copy_options::overwrite_existing, ec);
+  return Value(!ec);
+}
+
+Value builtin_os_move(const std::vector<Value> &args) {
+  if (args.size() != 2) {
+    throw std::runtime_error("os.move(src, dst) expects 2 arguments.");
+  }
+  fs::path src(value_to_string(args[0]));
+  fs::path dst(value_to_string(args[1]));
+  std::error_code ec;
+  fs::rename(src, dst, ec);
+  if (!ec) return Value(true);
+  fs::copy(src, dst, fs::copy_options::recursive | fs::copy_options::overwrite_existing, ec);
+  if (ec) return Value(false);
+  fs::remove_all(src, ec);
+  return Value(true);
+}
+
+Value builtin_os_getpid(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.getpid() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  return Value(static_cast<long>(GetCurrentProcessId()));
+#else
+  return Value(static_cast<long>(getpid()));
+#endif
+}
+
+Value builtin_os_exec(const std::vector<Value> &args) {
+  if (args.empty() || args.size() > 2) {
+    throw std::runtime_error("os.exec(cmd, args=[]) expects 1 or 2 arguments.");
+  }
+  std::string cmd = value_to_string(args[0]);
+  std::vector<std::string> argv;
+  if (args.size() == 2) argv = value_to_string_list(args[1]);
+
+#ifdef _WIN32
+  std::string cmdline = quote_arg(cmd);
+  for (const auto &a : argv) {
+    cmdline += " " + quote_arg(a);
+  }
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  ZeroMemory(&si, sizeof(si));
+  ZeroMemory(&pi, sizeof(pi));
+  si.cb = sizeof(si);
+  BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
+  if (!ok) return Value(-1L);
+  WaitForSingleObject(pi.hProcess, INFINITE);
+  DWORD exit_code = 0;
+  GetExitCodeProcess(pi.hProcess, &exit_code);
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+  return Value(static_cast<long>(exit_code));
+#else
+  pid_t pid = fork();
+  if (pid == 0) {
+    std::vector<char*> cargs;
+    cargs.reserve(argv.size() + 2);
+    cargs.push_back(const_cast<char*>(cmd.c_str()));
+    for (auto &a : argv) cargs.push_back(const_cast<char*>(a.c_str()));
+    cargs.push_back(nullptr);
+    execvp(cmd.c_str(), cargs.data());
+    _exit(127);
+  }
+  if (pid < 0) return Value(-1L);
+  int status = 0;
+  waitpid(pid, &status, 0);
+  if (WIFEXITED(status)) return Value(static_cast<long>(WEXITSTATUS(status)));
+  return Value(-1L);
+#endif
+}
+
+Value builtin_os_spawn(const std::vector<Value> &args) {
+  if (args.empty() || args.size() > 2) {
+    throw std::runtime_error("os.spawn(cmd, args=[]) expects 1 or 2 arguments.");
+  }
+  std::string cmd = value_to_string(args[0]);
+  std::vector<std::string> argv;
+  if (args.size() == 2) argv = value_to_string_list(args[1]);
+
+#ifdef _WIN32
+  std::string cmdline = quote_arg(cmd);
+  for (const auto &a : argv) {
+    cmdline += " " + quote_arg(a);
+  }
+  STARTUPINFOA si;
+  PROCESS_INFORMATION pi;
+  ZeroMemory(&si, sizeof(si));
+  ZeroMemory(&pi, sizeof(pi));
+  si.cb = sizeof(si);
+  BOOL ok = CreateProcessA(nullptr, cmdline.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si, &pi);
+  if (!ok) return Value(-1L);
+  DWORD pid = pi.dwProcessId;
+  CloseHandle(pi.hProcess);
+  CloseHandle(pi.hThread);
+  return Value(static_cast<long>(pid));
+#else
+  pid_t pid = fork();
+  if (pid == 0) {
+    std::vector<char*> cargs;
+    cargs.reserve(argv.size() + 2);
+    cargs.push_back(const_cast<char*>(cmd.c_str()));
+    for (auto &a : argv) cargs.push_back(const_cast<char*>(a.c_str()));
+    cargs.push_back(nullptr);
+    execvp(cmd.c_str(), cargs.data());
+    _exit(127);
+  }
+  if (pid < 0) return Value(-1L);
+  return Value(static_cast<long>(pid));
+#endif
+}
+
+Value builtin_os_kill(const std::vector<Value> &args) {
+  if (args.empty() || args.size() > 2) {
+    throw std::runtime_error("os.kill(pid, signal=9) expects 1 or 2 arguments.");
+  }
+  long pid = value_to_long(args[0]);
+  long sig = args.size() == 2 ? value_to_long(args[1]) : 9;
+#ifdef _WIN32
+  (void)sig;
+  HANDLE h = OpenProcess(PROCESS_TERMINATE, FALSE, static_cast<DWORD>(pid));
+  if (!h) return Value(false);
+  BOOL ok = TerminateProcess(h, 1);
+  CloseHandle(h);
+  return Value(ok != 0);
+#else
+  int rc = kill(static_cast<pid_t>(pid), static_cast<int>(sig));
+  return Value(rc == 0);
+#endif
+}
+
+Value builtin_os_user(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.user() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  char name_buf[UNLEN + 1];
+  DWORD size = UNLEN + 1;
+  if (GetUserNameA(name_buf, &size)) return Value(std::string(name_buf));
+  return Value("");
+#else
+  uid_t uid = geteuid();
+  struct passwd *pw = getpwuid(uid);
+  if (pw && pw->pw_name) return Value(std::string(pw->pw_name));
+  return Value("");
+#endif
+}
+
+Value builtin_os_uid(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.uid() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  return Value(-1L);
+#else
+  return Value(static_cast<long>(geteuid()));
+#endif
+}
+
+Value builtin_os_gid(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.gid() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  return Value(-1L);
+#else
+  return Value(static_cast<long>(getegid()));
+#endif
+}
+
+Value builtin_os_is_admin(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.is_admin() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  BOOL is_admin = FALSE;
+  PSID admin_group = nullptr;
+  SID_IDENTIFIER_AUTHORITY nt_auth = SECURITY_NT_AUTHORITY;
+  if (AllocateAndInitializeSid(&nt_auth, 2, SECURITY_BUILTIN_DOMAIN_RID,
+                               DOMAIN_ALIAS_RID_ADMINS, 0, 0, 0, 0, 0, 0,
+                               &admin_group)) {
+    CheckTokenMembership(nullptr, admin_group, &is_admin);
+    FreeSid(admin_group);
+  }
+  return Value(is_admin != 0);
+#else
+  return Value(geteuid() == 0);
+#endif
+}
+
+Value builtin_os_elevate(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.elevate() expects 0 arguments.");
+  }
+  bool admin = value_to_bool(builtin_os_is_admin({}));
+  return Value(admin);
+}
+
+Value builtin_os_sleep_ms(const std::vector<Value> &args) {
+  if (args.size() != 1) {
+    throw std::runtime_error("os.sleep_ms(ms) expects 1 argument.");
+  }
+  long ms = value_to_long(args[0]);
+  if (ms < 0) ms = 0;
+  std::this_thread::sleep_for(std::chrono::milliseconds(ms));
+  return Value(true);
+}
+
+Value builtin_os_env(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.env() expects 0 arguments.");
+  }
+  Value result(ObjectType::MAP);
+#ifdef _WIN32
+  LPCH env = GetEnvironmentStringsA();
+  if (!env) return result;
+  for (LPCH var = env; *var; ) {
+    std::string entry(var);
+    size_t pos = entry.find('=');
+    if (pos != std::string::npos) {
+      result.data.map[entry.substr(0, pos)] = Value(entry.substr(pos + 1));
+    }
+    var += entry.size() + 1;
+  }
+  FreeEnvironmentStringsA(env);
+#else
+    for (char **env = ::environ; env && *env; ++env) {
+    std::string entry(*env);
+    size_t pos = entry.find('=');
+    if (pos != std::string::npos) {
+      result.data.map[entry.substr(0, pos)] = Value(entry.substr(pos + 1));
+    }
+  }
+#endif
+  return result;
+}
+
+Value builtin_os_path_sep(const std::vector<Value> &args) {
+  if (!args.empty()) {
+    throw std::runtime_error("os.path_sep() expects 0 arguments.");
+  }
+#ifdef _WIN32
+  return Value(";");
+#else
+  return Value(":");
+#endif
+}
+
 Value create_os_module() {
   Value os_module(ObjectType::MAP);
 
@@ -5969,6 +9460,160 @@ Value create_os_module() {
   add_builtin("getenv", "os_getenv", {"key", "default"});
   add_builtin("setenv", "os_setenv", {"key", "value"});
   add_builtin("unsetenv", "os_unsetenv", {"key"});
+  add_builtin("shutdown", "os_shutdown", {"force", "delay"});
+  add_builtin("restart", "os_restart", {"force", "delay"});
+  add_builtin("logout", "os_logout", {});
+  add_builtin("lock", "os_lock", {});
+  add_builtin("sleep", "os_sleep", {"seconds"});
+  add_builtin("hibernate", "os_hibernate", {});
+  add_builtin("hostname", "os_hostname", {});
+  add_builtin("set_hostname", "os_set_hostname", {"name"});
+  add_builtin("uptime", "os_uptime", {});
+  add_builtin("cpu_count", "os_cpu_count", {});
+  add_builtin("mem_total", "os_mem_total", {});
+  add_builtin("mem_free", "os_mem_free", {});
+  add_builtin("platform", "os_platform", {});
+  add_builtin("chmod", "os_chmod", {"path", "mode"});
+  add_builtin("chown", "os_chown", {"path", "uid", "gid"});
+  add_builtin("stat", "os_stat", {"path"});
+  add_builtin("realpath", "os_realpath", {"path"});
+    add_builtin("realpath_ex", "os_realpath_ex", {"path", "strict"});
+  add_builtin("symlink", "os_symlink", {"target", "linkpath"});
+  add_builtin("readlink", "os_readlink", {"path"});
+    add_builtin("readlink_info", "os_readlink_info", {"path"});
+  add_builtin("copy", "os_copy", {"src", "dst"});
+  add_builtin("move", "os_move", {"src", "dst"});
+  add_builtin("getpid", "os_getpid", {});
+  add_builtin("exec", "os_exec", {"cmd", "args"});
+  add_builtin("spawn", "os_spawn", {"cmd", "args"});
+  add_builtin("kill", "os_kill", {"pid", "signal"});
+  add_builtin("user", "os_user", {});
+  add_builtin("uid", "os_uid", {});
+  add_builtin("gid", "os_gid", {});
+  add_builtin("is_admin", "os_is_admin", {});
+  add_builtin("elevate", "os_elevate", {});
+  add_builtin("sleep_ms", "os_sleep_ms", {"ms"});
+  add_builtin("env", "os_env", {});
+  add_builtin("path_sep", "os_path_sep", {});
+    add_builtin("expanduser", "os_expanduser", {"path"});
+    add_builtin("expandvars", "os_expandvars", {"path"});
+    add_builtin("path_expand", "os_path_expand", {"path"});
+    add_builtin("homedir", "os_homedir", {});
+    add_builtin("username", "os_username", {});
+    add_builtin("groups", "os_groups", {});
+    add_builtin("ppid", "os_ppid", {});
+    add_builtin("argv", "os_argv", {});
+    add_builtin("exit", "os_exit", {"code"});
+    add_builtin("which", "os_which", {"cmd"});
+    add_builtin("tempdir", "os_tempdir", {});
+    add_builtin("getenvs", "os_getenvs", {});
+    add_builtin("env_list", "os_env_list", {});
+    add_builtin("env_update", "os_env_update", {"map", "overwrite"});
+    add_builtin("getenv_int", "os_getenv_int", {"key", "default"});
+    add_builtin("getenv_float", "os_getenv_float", {"key", "default"});
+    add_builtin("getenv_bool", "os_getenv_bool", {"key", "default"});
+    add_builtin("env_snapshot", "os_env_snapshot", {});
+    add_builtin("env_diff", "os_env_diff", {"old", "new"});
+    add_builtin("access", "os_access", {"path", "mode"});
+    add_builtin("umask", "os_umask", {"mask"});
+    add_builtin("walk", "os_walk", {"path", "topdown"});
+    add_builtin("glob", "os_glob", {"pattern", "recursive"});
+    add_builtin("disk_usage", "os_disk_usage", {"path"});
+    add_builtin("statvfs", "os_statvfs", {"path"});
+    add_builtin("touch", "os_touch", {"path"});
+    add_builtin("rmdir_rf", "os_rmdir_rf", {"path"});
+    add_builtin("mkdir_p", "os_mkdir_p", {"path"});
+    add_builtin("ps", "os_ps", {});
+    add_builtin("run", "os_run", {"cmd", "args", "timeout_ms"});
+    add_builtin("waitpid", "os_waitpid", {"pid", "nohang"});
+    add_builtin("kill_tree", "os_kill_tree", {"pid", "signal"});
+    add_builtin("run_capture", "os_run_capture", {"cmd", "args", "timeout_ms", "input"});
+    add_builtin("popen", "os_popen", {"cmd", "args", "input"});
+    add_builtin("spawn_io", "os_spawn_io", {"cmd", "args", "stdin_path", "stdout_path", "stderr_path", "append"});
+    add_builtin("scandir", "os_scandir", {"path"});
+    add_builtin("link", "os_link", {"src", "dst"});
+    add_builtin("renameat", "os_renameat", {"olddir", "oldname", "newdir", "newname"});
+    add_builtin("lstat", "os_lstat", {"path"});
+    add_builtin("fstat", "os_fstat", {"fd"});
+    add_builtin("open", "os_open", {"path", "flags", "mode"});
+    add_builtin("read", "os_read", {"fd", "n"});
+    add_builtin("write", "os_write", {"fd", "data"});
+    add_builtin("fsync", "os_fsync", {"fd"});
+    add_builtin("close", "os_close", {"fd"});
+    add_builtin("fdopen", "os_fdopen", {"fd", "mode"});
+    add_builtin("chdir_push", "os_chdir_push", {"path"});
+    add_builtin("chdir_pop", "os_chdir_pop", {});
+    add_builtin("signal", "os_signal", {"sig", "action"});
+    add_builtin("alarm", "os_alarm", {"seconds"});
+    add_builtin("pause", "os_pause", {});
+    add_builtin("killpg", "os_killpg", {"pgid", "signal"});
+    add_builtin("setuid", "os_setuid", {"uid"});
+    add_builtin("setgid", "os_setgid", {"gid"});
+    add_builtin("getpgid", "os_getpgid", {"pid"});
+    add_builtin("setpgid", "os_setpgid", {"pid", "pgid"});
+    add_builtin("setsid", "os_setsid", {});
+    add_builtin("nice", "os_nice", {"delta"});
+    add_builtin("getpriority", "os_getpriority", {"kind", "id"});
+    add_builtin("setpriority", "os_setpriority", {"kind", "id", "prio"});
+    add_builtin("uid_name", "os_uid_name", {"uid"});
+    add_builtin("gid_name", "os_gid_name", {"gid"});
+    add_builtin("getpwnam", "os_getpwnam", {"name"});
+    add_builtin("getgrnam", "os_getgrnam", {"name"});
+    add_builtin("getlogin", "os_getlogin", {});
+    add_builtin("getgroups", "os_getgroups", {});
+    add_builtin("chflags", "os_chflags", {"path", "flags"});
+    add_builtin("loadavg", "os_loadavg", {});
+    add_builtin("cpu_info", "os_cpu_info", {});
+    add_builtin("os_release", "os_os_release", {});
+    add_builtin("boot_time", "os_boot_time", {});
+    add_builtin("locale", "os_locale", {});
+    add_builtin("timezone", "os_timezone", {});
+    add_builtin("mounts", "os_mounts", {});
+    add_builtin("service_control", "os_service_control", {"action", "name"});
+    add_builtin("service_query", "os_service_query", {"name"});
+    add_builtin("battery_info", "os_battery_info", {});
+    add_builtin("cgroups", "os_cgroups", {});
+    add_builtin("namespaces", "os_namespaces", {});
+
+#ifdef SIGINT
+    os_module.data.map["SIGINT"] = Value(static_cast<long>(SIGINT));
+#endif
+#ifdef SIGTERM
+    os_module.data.map["SIGTERM"] = Value(static_cast<long>(SIGTERM));
+#endif
+#ifdef SIGKILL
+    os_module.data.map["SIGKILL"] = Value(static_cast<long>(SIGKILL));
+#endif
+#ifdef SIGABRT
+    os_module.data.map["SIGABRT"] = Value(static_cast<long>(SIGABRT));
+#endif
+#ifdef SIGSEGV
+    os_module.data.map["SIGSEGV"] = Value(static_cast<long>(SIGSEGV));
+#endif
+#ifdef SIGALRM
+    os_module.data.map["SIGALRM"] = Value(static_cast<long>(SIGALRM));
+#endif
+#ifdef SIGPIPE
+    os_module.data.map["SIGPIPE"] = Value(static_cast<long>(SIGPIPE));
+#endif
+#ifdef SIGUSR1
+    os_module.data.map["SIGUSR1"] = Value(static_cast<long>(SIGUSR1));
+#endif
+#ifdef SIGUSR2
+    os_module.data.map["SIGUSR2"] = Value(static_cast<long>(SIGUSR2));
+#endif
+#ifdef SIGCHLD
+    os_module.data.map["SIGCHLD"] = Value(static_cast<long>(SIGCHLD));
+#endif
+#ifdef SIGSTOP
+    os_module.data.map["SIGSTOP"] = Value(static_cast<long>(SIGSTOP));
+#endif
+#ifdef SIGCONT
+    os_module.data.map["SIGCONT"] = Value(static_cast<long>(SIGCONT));
+#endif
+#ifdef SIGTSTP
+    os_module.data.map["SIGTSTP"] = Value(static_cast<long>(SIGTSTP));
+#endif
 
   return os_module;
 }
@@ -9286,6 +12931,39 @@ public:
         add_method("getenv");
         add_method("setenv");
         add_method("unsetenv");
+        add_method("shutdown");
+        add_method("restart");
+        add_method("logout");
+        add_method("lock");
+        add_method("sleep");
+        add_method("hibernate");
+        add_method("hostname");
+        add_method("set_hostname");
+        add_method("uptime");
+        add_method("cpu_count");
+        add_method("mem_total");
+        add_method("mem_free");
+        add_method("platform");
+        add_method("chmod");
+        add_method("chown");
+        add_method("stat");
+        add_method("realpath");
+        add_method("symlink");
+        add_method("readlink");
+        add_method("copy");
+        add_method("move");
+        add_method("getpid");
+        add_method("exec");
+        add_method("spawn");
+        add_method("kill");
+        add_method("user");
+        add_method("uid");
+        add_method("gid");
+        add_method("is_admin");
+        add_method("elevate");
+        add_method("sleep_ms");
+        add_method("env");
+        add_method("path_sep");
         return os_module_map;
     }
 
@@ -9435,6 +13113,120 @@ public:
         if (method_name == "getenv") return os_bindings::builtin_os_getenv(args);
         if (method_name == "setenv") return os_bindings::builtin_os_setenv(args);
         if (method_name == "unsetenv") return os_bindings::builtin_os_unsetenv(args);
+        if (method_name == "shutdown") return os_bindings::builtin_os_shutdown(args);
+        if (method_name == "restart") return os_bindings::builtin_os_restart(args);
+        if (method_name == "logout") return os_bindings::builtin_os_logout(args);
+        if (method_name == "lock") return os_bindings::builtin_os_lock(args);
+        if (method_name == "sleep") return os_bindings::builtin_os_sleep(args);
+        if (method_name == "hibernate") return os_bindings::builtin_os_hibernate(args);
+        if (method_name == "hostname") return os_bindings::builtin_os_hostname(args);
+        if (method_name == "set_hostname") return os_bindings::builtin_os_set_hostname(args);
+        if (method_name == "uptime") return os_bindings::builtin_os_uptime(args);
+        if (method_name == "cpu_count") return os_bindings::builtin_os_cpu_count(args);
+        if (method_name == "mem_total") return os_bindings::builtin_os_mem_total(args);
+        if (method_name == "mem_free") return os_bindings::builtin_os_mem_free(args);
+        if (method_name == "platform") return os_bindings::builtin_os_platform(args);
+        if (method_name == "chmod") return os_bindings::builtin_os_chmod(args);
+        if (method_name == "chown") return os_bindings::builtin_os_chown(args);
+        if (method_name == "stat") return os_bindings::builtin_os_stat(args);
+        if (method_name == "realpath") return os_bindings::builtin_os_realpath(args);
+        if (method_name == "symlink") return os_bindings::builtin_os_symlink(args);
+        if (method_name == "readlink") return os_bindings::builtin_os_readlink(args);
+        if (method_name == "copy") return os_bindings::builtin_os_copy(args);
+        if (method_name == "move") return os_bindings::builtin_os_move(args);
+        if (method_name == "getpid") return os_bindings::builtin_os_getpid(args);
+        if (method_name == "exec") return os_bindings::builtin_os_exec(args);
+        if (method_name == "spawn") return os_bindings::builtin_os_spawn(args);
+        if (method_name == "kill") return os_bindings::builtin_os_kill(args);
+        if (method_name == "user") return os_bindings::builtin_os_user(args);
+        if (method_name == "uid") return os_bindings::builtin_os_uid(args);
+        if (method_name == "gid") return os_bindings::builtin_os_gid(args);
+        if (method_name == "is_admin") return os_bindings::builtin_os_is_admin(args);
+        if (method_name == "elevate") return os_bindings::builtin_os_elevate(args);
+        if (method_name == "sleep_ms") return os_bindings::builtin_os_sleep_ms(args);
+        if (method_name == "env") return os_bindings::builtin_os_env(args);
+        if (method_name == "path_sep") return os_bindings::builtin_os_path_sep(args);
+        if (method_name == "expanduser") return os_bindings::builtin_os_expanduser(args);
+        if (method_name == "expandvars") return os_bindings::builtin_os_expandvars(args);
+        if (method_name == "path_expand") return os_bindings::builtin_os_path_expand(args);
+        if (method_name == "homedir") return os_bindings::builtin_os_homedir(args);
+        if (method_name == "username") return os_bindings::builtin_os_username(args);
+        if (method_name == "groups") return os_bindings::builtin_os_groups(args);
+        if (method_name == "ppid") return os_bindings::builtin_os_ppid(args);
+        if (method_name == "argv") return os_bindings::builtin_os_argv(args);
+        if (method_name == "exit") return os_bindings::builtin_os_exit(args);
+        if (method_name == "which") return os_bindings::builtin_os_which(args);
+        if (method_name == "tempdir") return os_bindings::builtin_os_tempdir(args);
+        if (method_name == "getenvs") return os_bindings::builtin_os_getenvs(args);
+        if (method_name == "env_list") return os_bindings::builtin_os_env_list(args);
+        if (method_name == "access") return os_bindings::builtin_os_access(args);
+        if (method_name == "umask") return os_bindings::builtin_os_umask(args);
+        if (method_name == "env_update") return os_bindings::builtin_os_env_update(args);
+        if (method_name == "getenv_int") return os_bindings::builtin_os_getenv_int(args);
+        if (method_name == "getenv_float") return os_bindings::builtin_os_getenv_float(args);
+        if (method_name == "getenv_bool") return os_bindings::builtin_os_getenv_bool(args);
+        if (method_name == "env_snapshot") return os_bindings::builtin_os_env_snapshot(args);
+        if (method_name == "env_diff") return os_bindings::builtin_os_env_diff(args);
+        if (method_name == "walk") return os_bindings::builtin_os_walk(args);
+        if (method_name == "glob") return os_bindings::builtin_os_glob(args);
+        if (method_name == "disk_usage") return os_bindings::builtin_os_disk_usage(args);
+        if (method_name == "statvfs") return os_bindings::builtin_os_statvfs(args);
+        if (method_name == "touch") return os_bindings::builtin_os_touch(args);
+        if (method_name == "rmdir_rf") return os_bindings::builtin_os_rmdir_rf(args);
+        if (method_name == "mkdir_p") return os_bindings::builtin_os_mkdir_p(args);
+        if (method_name == "ps") return os_bindings::builtin_os_ps(args);
+        if (method_name == "run") return os_bindings::builtin_os_run(args);
+        if (method_name == "waitpid") return os_bindings::builtin_os_waitpid(args);
+        if (method_name == "kill_tree") return os_bindings::builtin_os_kill_tree(args);
+        if (method_name == "run_capture") return os_bindings::builtin_os_run_capture(args);
+        if (method_name == "popen") return os_bindings::builtin_os_popen(args);
+        if (method_name == "spawn_io") return os_bindings::builtin_os_spawn_io(args);
+        if (method_name == "scandir") return os_bindings::builtin_os_scandir(args);
+        if (method_name == "link") return os_bindings::builtin_os_link(args);
+        if (method_name == "renameat") return os_bindings::builtin_os_renameat(args);
+        if (method_name == "lstat") return os_bindings::builtin_os_lstat(args);
+        if (method_name == "fstat") return os_bindings::builtin_os_fstat(args);
+        if (method_name == "open") return os_bindings::builtin_os_open(args);
+        if (method_name == "read") return os_bindings::builtin_os_read(args);
+        if (method_name == "write") return os_bindings::builtin_os_write(args);
+        if (method_name == "fsync") return os_bindings::builtin_os_fsync(args);
+        if (method_name == "close") return os_bindings::builtin_os_close(args);
+        if (method_name == "fdopen") return os_bindings::builtin_os_fdopen(args);
+        if (method_name == "chdir_push") return os_bindings::builtin_os_chdir_push(args);
+        if (method_name == "chdir_pop") return os_bindings::builtin_os_chdir_pop(args);
+        if (method_name == "signal") return os_bindings::builtin_os_signal(args);
+        if (method_name == "alarm") return os_bindings::builtin_os_alarm(args);
+        if (method_name == "pause") return os_bindings::builtin_os_pause(args);
+        if (method_name == "killpg") return os_bindings::builtin_os_killpg(args);
+        if (method_name == "setuid") return os_bindings::builtin_os_setuid(args);
+        if (method_name == "setgid") return os_bindings::builtin_os_setgid(args);
+        if (method_name == "getpgid") return os_bindings::builtin_os_getpgid(args);
+        if (method_name == "setpgid") return os_bindings::builtin_os_setpgid(args);
+        if (method_name == "setsid") return os_bindings::builtin_os_setsid(args);
+        if (method_name == "nice") return os_bindings::builtin_os_nice(args);
+        if (method_name == "getpriority") return os_bindings::builtin_os_getpriority(args);
+        if (method_name == "setpriority") return os_bindings::builtin_os_setpriority(args);
+        if (method_name == "uid_name") return os_bindings::builtin_os_uid_name(args);
+        if (method_name == "gid_name") return os_bindings::builtin_os_gid_name(args);
+        if (method_name == "getpwnam") return os_bindings::builtin_os_getpwnam(args);
+        if (method_name == "getgrnam") return os_bindings::builtin_os_getgrnam(args);
+        if (method_name == "getlogin") return os_bindings::builtin_os_getlogin(args);
+        if (method_name == "getgroups") return os_bindings::builtin_os_getgroups(args);
+        if (method_name == "chflags") return os_bindings::builtin_os_chflags(args);
+        if (method_name == "loadavg") return os_bindings::builtin_os_loadavg(args);
+        if (method_name == "cpu_info") return os_bindings::builtin_os_cpu_info(args);
+        if (method_name == "os_release") return os_bindings::builtin_os_os_release(args);
+        if (method_name == "boot_time") return os_bindings::builtin_os_boot_time(args);
+        if (method_name == "locale") return os_bindings::builtin_os_locale(args);
+        if (method_name == "timezone") return os_bindings::builtin_os_timezone(args);
+        if (method_name == "mounts") return os_bindings::builtin_os_mounts(args);
+        if (method_name == "service_control") return os_bindings::builtin_os_service_control(args);
+        if (method_name == "service_query") return os_bindings::builtin_os_service_query(args);
+        if (method_name == "battery_info") return os_bindings::builtin_os_battery_info(args);
+        if (method_name == "cgroups") return os_bindings::builtin_os_cgroups(args);
+        if (method_name == "namespaces") return os_bindings::builtin_os_namespaces(args);
+        if (method_name == "readlink_info") return os_bindings::builtin_os_readlink_info(args);
+        if (method_name == "realpath_ex") return os_bindings::builtin_os_realpath_ex(args);
         throw std::runtime_error("Unknown os method: " + method_name);
     }
 
@@ -14726,6 +18518,7 @@ int build_native_executable(const std::string& self_exe_path,
 
 // Main function to run the interpreter
 int main(int argc, char* argv[]) {
+    os_bindings::set_cli_args(argc, argv);
     // Build command:
     // levython build <input.levy|.ly> [-o output] [--target native|windows|linux|macos|triple]
     //                                  [--runtime /path/to/runtime] [--source-root /path/to/repo]
