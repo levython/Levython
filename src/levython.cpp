@@ -94,7 +94,7 @@
 #endif
 
 #ifndef _WIN32
-extern char **environ;
+extern "C" char **environ;
 #endif
 
 // HTTP Module
