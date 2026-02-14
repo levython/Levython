@@ -1,20 +1,20 @@
 {
   "iconDefinitions": {
-    "levython_dragon": {
-      "iconPath": "./levython-dragon-logo.svg"
+    "levython_icon": {
+      "iconPath": "./icon.png"
     }
   },
   "fileExtensions": {
-    "levy": "levython_dragon",
-    "ly": "levython_dragon"
+    "levy": "levython_icon",
+    "ly": "levython_icon"
   },
   "fileNames": {
-    "levython": "levython_dragon",
-    ".levyrc": "levython_dragon",
-    "levython.config": "levython_dragon"
+    "levython": "levython_icon",
+    ".levyrc": "levython_icon",
+    "levython.config": "levython_icon"
   },
   "languageIds": {
-    "levython": "levython_dragon"
+    "levython": "levython_icon"
   },
   "hidesExplorerArrows": false
 }

@@ -48,8 +48,8 @@
                 "extensions": [".levy", ".ly"],
                 "configuration": "./language-configuration.json",
                 "icon": {
-                    "light": "./icons/levython-dragon-logo.svg",
-                    "dark": "./icons/levython-dragon-logo.svg"
+                    "light": "./icons/icon.png",
+                    "dark": "./icons/icon.png"
                 }
             }
         ],

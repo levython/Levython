@@ -189,7 +189,9 @@ extern "C" char **environ;
     #include <sys/ptrace.h> // For process tracing/hooking
     #include <linux/input.h>  // For input event structures
     #include <linux/uinput.h> // For virtual input device creation
+    #include <dirent.h>      // For directory operations (opendir, readdir, closedir)
     #include <X11/Xlib.h>     // For X11 input control (if available)
+    #include <X11/Xutil.h>    // For X11 image functions (XGetPixel, XDestroyImage)
     #include <X11/extensions/XTest.h> // For XTest extension
     // Audio headers for Linux (ALSA)
     #include <alsa/asoundlib.h> // ALSA audio library
