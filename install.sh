@@ -434,6 +434,10 @@ compile_levython() {
             COMPILE_FLAGS="$COMPILE_FLAGS -mmacosx-version-min=10.14"
             LINK_LIBS="$LINK_LIBS -framework Security -framework CoreFoundation -framework CoreGraphics -framework CoreAudio -framework AudioToolbox"
             ;;
+        "linux"|"wsl")
+            # Linux libraries for audio (ALSA) and display (X11)
+            LINK_LIBS="$LINK_LIBS -lpthread -ldl -lasound -lX11 -lXtst"
+            ;;
     esac
 
     # HTTP client is implemented in a separate translation unit

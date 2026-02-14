@@ -29,12 +29,8 @@ ifeq ($(UNAME_S),Darwin)
     endif
 else ifeq ($(UNAME_S),Linux)
     PLATFORM = Linux
-    HTTP_LIBS += -lpthread -ldl
+    HTTP_LIBS += -lpthread -ldl -lasound -lX11 -lXtst
     INSTALL_DIR = /usr/local/bin
-    # Check for X11/Wayland for display functionality
-    ifneq ($(shell pkg-config --exists x11 && echo yes),)
-        LDFLAGS += $(shell pkg-config --cflags --libs x11)
-    endif
 else ifeq ($(findstring MINGW,$(UNAME_S)),MINGW)
     PLATFORM = Windows
     OUT = levython.exe
