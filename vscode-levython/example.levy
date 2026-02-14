@@ -1,0 +1,456 @@
+# Levython Complete Feature Showcase
+# This file demonstrates all language features for extension testing
+
+# ============================================================================
+# VARIABLES AND TYPES
+# ============================================================================
+name <- "Levython"
+version <- 1.0.3
+pi <- 3.14159
+is_active <- true
+nothing <- none
+
+# Boolean aliases
+yes_value <- yes
+no_value <- no
+
+# Collections
+numbers <- [1, 2, 3, 4, 5]
+person <- {"name": "John", "age": 30}
+
+# ============================================================================
+# FUNCTIONS
+# ============================================================================
+act greet(name) {
+    say("Hello, " + name + "!")
+}
+
+act add(a, b) {
+    -> a + b
+}
+
+act fibonacci(n) {
+    if n < 2 {
+        -> n
+    }
+    -> fibonacci(n - 1) + fibonacci(n - 2)
+}
+
+# ============================================================================
+# CLASSES AND OOP
+# ============================================================================
+class Animal {
+    act init(name) {
+        self.name <- name
+    }
+    
+    act speak() {
+        say(self.name + " makes a sound")
+    }
+}
+
+class Dog is_a Animal {
+    act init(name, breed) {
+        self.name <- name
+        self.breed <- breed
+    }
+    
+    act speak() {
+        say(self.name + " barks!")
+    }
+}
+
+abstract class Shape {
+    act init() {
+        # Abstract base
+    }
+    
+    act area() {
+        throw("Must be implemented")
+    }
+}
+
+# ============================================================================
+# EXCEPTION HANDLING
+# ============================================================================
+try {
+    result <- risky_operation()
+    say("Success: " + str(result))
+} catch e {
+    say("Error: " + str(e))
+}
+
+# ============================================================================
+# TERNARY OPERATOR
+# ============================================================================
+status <- count > 10 ? "large" : "small"
+message <- is_active ? "ON" : "OFF"
+
+# ============================================================================
+# CONTROL FLOW
+# ============================================================================
+if count > 5 {
+    say("Big")
+} else {
+    say("Small")
+}
+
+for i in range(0, 10) {
+    say(str(i))
+}
+
+items <- ["a", "b", "c"]
+for item in items {
+    say(item)
+}
+
+counter <- 5
+while counter > 0 {
+    say(str(counter))
+    counter <- counter - 1
+}
+
+# ============================================================================
+# OS MODULE
+# ============================================================================
+os <- import("os")
+
+# File operations
+exists <- os.exists("file.txt")
+content <- os.read_file("file.txt")
+os.write_file("output.txt", "Hello")
+files <- os.listdir(".")
+
+# Process management
+pid <- os.spawn("echo", ["hello"])
+result <- os.run("ls", ["-la"], 5000)
+processes <- os.ps()
+
+# Environment
+env_var <- os.getenv("HOME", "/default")
+os.setenv("MY_VAR", "value")
+
+# ============================================================================
+# OS.HOOKS - System Event Monitoring
+# ============================================================================
+hook_id <- os.Hooks.register("PROCESS_CREATE", "Monitor processes")
+os.Hooks.set_callback(hook_id, act(event) {
+    pid <- event["pid"]
+    name <- event["name"]
+    say("New process: " + name + " (PID: " + str(pid) + ")")
+})
+os.Hooks.enable(hook_id)
+
+# ============================================================================
+# OS.INPUTCONTROL - Input Automation
+# ============================================================================
+os.InputControl.capture_keyboard()
+os.InputControl.type_text("Hello, World!")
+os.InputControl.tap_key("ENTER")
+os.InputControl.release_keyboard()
+
+os.InputControl.capture_mouse()
+os.InputControl.move_mouse(500, 300)
+os.InputControl.click_mouse_button("LEFT", 1)
+os.InputControl.release_mouse()
+
+# ============================================================================
+# OS.PROCESSES - Advanced Process Management
+# ============================================================================
+procs <- os.Processes.list()
+for proc in procs {
+    say("PID: " + str(proc["pid"]) + " - " + proc["name"])
+}
+
+opts <- {
+    "cwd": "/tmp",
+    "env": {"VAR": "value"}
+}
+new_pid <- os.Processes.create("myapp", ["arg1"], opts)
+
+# Memory operations
+data <- os.Processes.read_memory(new_pid, 0x400000, 256)
+os.Processes.write_memory(new_pid, 0x400000, data)
+
+# ============================================================================
+# OS.AUDIO - Audio Playback
+# ============================================================================
+os.Audio.load("sound.wav")
+os.Audio.play()
+os.Audio.set_volume(0.8)
+os.Audio.pause()
+os.Audio.resume()
+os.Audio.stop()
+
+# ============================================================================
+# OS.DISPLAY - Display Management
+# ============================================================================
+displays <- os.Display.list_displays()
+for disp in displays {
+    say("Display: " + str(disp["width"]) + "x" + str(disp["height"]))
+}
+os.Display.screenshot("/tmp/screen.png")
+
+# ============================================================================
+# OS.PRIVILEGES - Privilege Management
+# ============================================================================
+is_admin <- os.Privileges.is_admin()
+if not is_admin {
+    say("Requesting admin privileges...")
+    # result <- os.Privileges.elevate()
+}
+
+# ============================================================================
+# HTTP MODULE
+# ============================================================================
+http <- import("http")
+
+# HTTP GET
+response <- http.get("https://api.example.com/data")
+say("Status: " + str(response["status"]))
+say("Body: " + response["body"])
+
+# HTTP POST
+post_response <- http.post("https://api.example.com/data", {"key": "value"})
+
+# ============================================================================
+# HTTP SERVER
+# ============================================================================
+http_server <- import("http_server")
+
+act handler(req) {
+    path <- req["path"]
+    method <- req["method"]
+    
+    if path == "/" {
+        -> {"status": 200, "body": "Hello, World!"}
+    }
+    
+    if path == "/api/data" {
+        json <- import("json")
+        -> {"status": 200, "body": json.stringify({"data": "value"})}
+    }
+    
+    -> {"status": 404, "body": "Not Found"}
+}
+
+# http_server.serve("127.0.0.1", 8080, handler)
+
+# ============================================================================
+# ASYNC MODULE
+# ============================================================================
+async <- import("async")
+
+task_id <- async.spawn(act() {
+    async.sleep(1000)
+    -> "Task completed"
+})
+
+# Wait for completion
+while not async.done(task_id) {
+    async.tick(100)
+}
+result <- async.result(task_id)
+
+# Or use await
+task_id2 <- async.spawn(act() {
+    -> "Another task"
+})
+result2 <- async.await(task_id2)
+
+# ============================================================================
+# THREADING
+# ============================================================================
+thread <- import("thread")
+
+tid <- thread.create(act() {
+    say("Thread is running...")
+    os.sleep_ms(500)
+    say("Thread completed")
+})
+
+thread.join(tid)
+
+# ============================================================================
+# CHANNEL COMMUNICATION
+# ============================================================================
+channel <- import("channel")
+
+ch <- channel.create(10)
+channel.send(ch, "Hello from main")
+message <- channel.recv(ch)
+say("Received: " + message)
+
+# ============================================================================
+# FILE SYSTEM
+# ============================================================================
+fs <- import("fs")
+
+content <- fs.read_text("/path/to/file.txt")
+fs.write_text("/path/to/output.txt", "Hello, World!")
+fs.copy("source.txt", "dest.txt")
+fs.move("old.txt", "new.txt")
+
+# ============================================================================
+# PATH MODULE
+# ============================================================================
+path <- import("path")
+
+full_path <- path.join("/home/user", "documents", "file.txt")
+dirname <- path.dirname(full_path)
+basename <- path.basename(full_path)
+ext <- path.ext(full_path)
+
+# ============================================================================
+# JSON MODULE
+# ============================================================================
+json <- import("json")
+
+data <- json.parse("{\"name\": \"John\", \"age\": 30}")
+json_str <- json.stringify({"key": "value", "number": 42})
+
+# ============================================================================
+# NETWORKING
+# ============================================================================
+net <- import("net")
+
+# TCP Server
+# server <- net.tcp_listen("127.0.0.1", 9000)
+# client <- net.tcp_accept(server)
+# data <- net.tcp_recv(client, 1024)
+# net.tcp_send(client, "Response")
+# net.tcp_close(client)
+
+# TCP Client
+sock <- net.tcp_connect("127.0.0.1", 9000)
+net.tcp_send(sock, "Hello Server")
+response <- net.tcp_recv(sock, 1024)
+net.tcp_close(sock)
+
+# ============================================================================
+# CRYPTOGRAPHY
+# ============================================================================
+crypto <- import("crypto")
+
+# Hashing
+sha_hash <- crypto.sha256("data")
+md5_hash <- crypto.md5("data")
+
+# Encryption
+key <- "encryption_key"
+encrypted <- crypto.encrypt("secret data", key)
+decrypted <- crypto.decrypt(encrypted, key)
+
+# ============================================================================
+# DATETIME MODULE
+# ============================================================================
+datetime <- import("datetime")
+
+now <- datetime.now_utc()
+formatted <- datetime.format(now, "%Y-%m-%d %H:%M:%S")
+say("Current time: " + formatted)
+
+# Sleep
+datetime.sleep_ms(1000)
+
+# ============================================================================
+# LOGGING
+# ============================================================================
+log <- import("log")
+
+log.set_level("info")
+log.info("Information message")
+log.warn("Warning message")
+log.error("Error message")
+
+# JSON logging
+log.set_json(yes)
+log.info("Structured log", {"user": "john", "action": "login"})
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+config <- import("config")
+
+config.load_env(".env")
+db_host <- config.get("DB_HOST", "localhost")
+db_port <- config.get("DB_PORT", "5432")
+
+# ============================================================================
+# INPUT MODULE
+# ============================================================================
+input <- import("input")
+
+# ASCII/Character conversion
+char <- input.chr(65)  # Returns "A"
+code <- input.ord("A")  # Returns 65
+
+# Non-blocking input
+input.enable_raw()
+while yes {
+    r <- input.poll()
+    if r["ok"] {
+        key <- r["key"]
+        say("Key pressed: " + key)
+        if key == "q" {
+            break
+        }
+    }
+    os.sleep_ms(10)
+}
+input.disable_raw()
+
+# ============================================================================
+# ALGORITHMS
+# ============================================================================
+
+# Quick Sort
+act quicksort(arr) {
+    if len(arr) <= 1 {
+        -> arr
+    }
+    pivot <- arr[0]
+    left <- []
+    right <- []
+    for i in range(1, len(arr)) {
+        if arr[i] < pivot {
+            append(left, arr[i])
+        } else {
+            append(right, arr[i])
+        }
+    }
+    -> quicksort(left) + [pivot] + quicksort(right)
+}
+
+# Map, Filter, Reduce
+act map_fn(arr, fn) {
+    result <- []
+    for item in arr {
+        append(result, fn(item))
+    }
+    -> result
+}
+
+act filter_fn(arr, predicate) {
+    result <- []
+    for item in arr {
+        if predicate(item) {
+            append(result, item)
+        }
+    }
+    -> result
+}
+
+act reduce_fn(arr, fn, initial) {
+    acc <- initial
+    for item in arr {
+        acc <- fn(acc, item)
+    }
+    -> acc
+}
+
+# ============================================================================
+# MAIN EXECUTION
+# ============================================================================
+say("Levython " + str(version) + " - Complete Feature Showcase")
+say("All language features demonstrated!")

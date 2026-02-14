@@ -1,0 +1,28 @@
+# Quick demo of ord() and chr()
+import input
+
+say("=== Python-style ord() and chr() ===")
+say("")
+
+# ord() - character to ASCII
+say("ord() - Character to ASCII code:")
+say("  input.ord('A') = " + str(input.ord("A")))
+say("  input.ord('z') = " + str(input.ord("z")))
+say("  input.ord('0') = " + str(input.ord("0")))
+say("")
+
+# chr() - ASCII to character  
+say("chr() - ASCII code to character:")
+say("  input.chr(65) = '" + input.chr(65) + "'")
+say("  input.chr(122) = '" + input.chr(122) + "'")
+say("  input.chr(48) = '" + input.chr(48) + "'")
+say("")
+
+# Practical example
+say("Practical use with os.InputControl:")
+say("  # Old way (direct key code):")
+say("  os.InputControl.press_key(65)")
+say("")
+say("  # New way (clear and readable):")
+say("  key_code <- input.ord('A')")
+say("  os.InputControl.press_key(key_code)")

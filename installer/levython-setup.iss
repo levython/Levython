@@ -14,7 +14,7 @@
 ; ==============================================================================
 
 #define MyAppName "Levython"
-#define MyAppVersion "1.0.2"
+#define MyAppVersion "1.0.3"
 #define MyAppPublisher "Levython Authors"
 #define MyAppURL "https://github.com/levython/levython"
 #define MyAppExeName "levython.exe"

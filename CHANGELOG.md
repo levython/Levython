@@ -2,6 +2,103 @@
 
 All notable changes to Levython will be documented in this file.
 
+## [1.0.3] - 2026-02-14
+
+### 🚀 Major Features & System Modules
+
+**Advanced System Control Modules:**
+- ✅ **OS.Hooks**: System event hooking for process, file, network, keyboard, and mouse monitoring
+  - `register(type, description='')`, `unregister(hook_id)`, `enable(hook_id)`, `disable(hook_id)`
+  - `hook_process_create(pid)`, `hook_process_exit(pid, exit_code=0)`
+  - `hook_file_access(path, mode='read')`, `hook_network_connect(host, port, protocol='tcp')`
+  - `hook_keyboard(key_code, pressed)`, `hook_mouse(x, y, button=0, pressed=true)`
+  - `hook_syscall(syscall_number, args=[])`, `inject_library(pid, library_path)`
+  - `hook_memory_access(pid, address, size=8)`
+- ✅ **OS.InputControl**: Keyboard, mouse, and touch automation with key remapping and blocking
+  - `capture_keyboard()`, `release_keyboard()`, `keyboard_send(key, pressed)`
+  - `press_key(key)`, `release_key(key)`, `tap_key(key, duration=0)`
+  - `type_text(text)`, `type_text_raw(text)`, `block_key(key)`, `unblock_key(key)`
+  - `remap_key(from_key, to_key)`, `get_keyboard_state()`
+  - `capture_mouse()`, `release_mouse()`, `move_mouse(x, y)`
+  - `mouse_click(button, pressed)`, `press_mouse_button(button)`, `release_mouse_button(button)`
+  - `click_mouse_button(button, clicks=1)`, `scroll_mouse(dx, dy)`
+  - `block_mouse_button(button)`, `unblock_mouse_button(button)`
+  - `get_mouse_position()`, `set_mouse_position(x, y)`
+  - `capture_touch()`, `release_touch()`, `send_touch_event(x, y, pressure=1.0)`
+  - `clear_input_buffer()`, `is_capturing()` returns {keyboard, mouse, touch}
+- ✅ **OS.Processes**: Advanced process management with memory operations and thread control
+- ✅ **OS.Display**: Screen capture, pixel manipulation, and overlay rendering
+  - `list()`, `get_primary()`, `capture_screen(display_id=0)`
+  - `capture_region(x, y, width, height, display_id=0)`, `capture_window(window_id)`
+  - `get_pixel(x, y, display_id=0)`, `show_cursor()`, `hide_cursor()`
+- ✅ **OS.Audio**: Audio device management, playback, recording, and streaming
+  - `list_devices(type='all')`, `get_default_device(type='playback')`, `set_default_device(device_id)`
+  - `get_device_info(device_id)`, `get_volume(device_id=default)`, `set_volume(volume, device_id=default)`
+  - `is_muted(device_id=default)`, `set_mute(muted, device_id=default)`
+  - `play_sound(file_path, volume=1.0, device_id=default)`, `play_tone(frequency, duration, volume=0.5)`
+  - `stop(stream_id)`, `create_stream(config)`, `write_stream(stream_id, audio_data)`
+  - `close_stream(stream_id)`, `get_sample_rate(device_id=default)`, `set_sample_rate(sample_rate, device_id=default)`
+  - `record(duration, device_id=default)`, `stop_recording(stream_id)`, `mix_streams(audio_data_list, weights)`
+- ✅ **OS.Privileges**: Privilege elevation and user impersonation
+  - `is_elevated()`, `is_admin()`, `is_root()`, `get_level()`, `can_elevate()`
+  - `request_elevation(reason='')`, `elevate_and_restart(args=[])`
+  - `check(privilege_name)`, `enable(privilege_name)`, `drop()`
+  - `run_as_admin(command, args=[])`, `get_user_info()`, `get_token_info()`
+  - `impersonate_user(username)`
+- ✅ **OS.Events**: File, network, and power event monitoring
+  - `watch_file(path, event_types, callback)`, `watch_network(callback)`, `watch_power(callback)`
+  - `unwatch(listener_id)`, `poll(timeout_ms=0)`, `start_loop()`, `stop_loop()`
+  - `list()`, `set_callback(event_type, callback)`, `remove_callback(event_type)`
+  - `dispatch()`, `get_recent(count=10)`
+- ✅ **OS.Persistence**: Autostart, service, and scheduled task management
+  - `add_autostart(name, command, location=None)`, `remove_autostart(name, location=None)`
+  - `list_autostart(location=None)`, `install_service(name, display_name, description, command, auto_start=true)`
+  - `uninstall_service(name)`, `start_service(name)`, `stop_service(name)`, `restart_service(name)`
+  - `get_service_status(name)`, `add_scheduled_task(name, command, schedule, schedule_time=None)`
+  - `remove_scheduled_task(name)`
+
+**Language Features:**
+- ✅ **Ternary Operator**: Conditional expressions with `condition ? true_value : false_value` syntax
+- ✅ **Input Module Enhancement**: `input.chr()` and `input.ord()` for ASCII/key conversion
+
+**OS Module Enhancements:**
+- ✅ **Advanced Filesystem APIs**: `scandir`, `link`, `renameat`, `lstat`, `fstat`
+- ✅ **File Descriptor Operations**: `open`, `read`, `write`, `fsync`, `close`, `fdopen`
+- ✅ **Directory Stack**: `chdir_push`, `chdir_pop` for directory navigation
+- ✅ **Signal Handling** (POSIX): `signal`, `alarm`, `pause`, `killpg` with signal constants
+- ✅ **Enhanced Process Control**: 
+  - `run_capture(cmd, args, timeout_ms, input)` - Capture stdout/stderr/exit code
+  - `popen(cmd, args, input)` - Simple stdout capture
+  - `spawn_io(cmd, args, stdin_path, stdout_path, stderr_path, append)` - I/O redirection
+  - `waitpid(pid, nohang)` - Non-blocking wait
+  - `kill_tree(pid, signal)` - Kill process tree
+- ✅ **User/Group Management**: `uid_name`, `gid_name`, `getpwnam`, `getgrnam`, `getlogin`, `getgroups`
+- ✅ **Enhanced Permissions**: `chmod` supports symbolic modes (`u+rwx,g-w`) and octal strings
+- ✅ **System Information**: 
+  - `cpu_info()`, `os_release()`, `boot_time()`
+  - `locale()`, `timezone()`, `mounts()`
+  - `loadavg()` - System load averages
+- ✅ **Path Operations**: `expanduser`, `expandvars`, `path_expand`
+- ✅ **Filesystem Utilities**: `walk`, `glob`, `disk_usage`, `statvfs`, `touch`, `rmdir_rf`, `mkdir_p`
+- ✅ **Environment Management**: `getenvs`, `env_list` with atomic updates and typed access
+
+**Platform-Specific Features:**
+- ✅ **macOS**: `chflags`, power/battery stats
+- ✅ **Windows**: Service control, proper Windows API integration
+- ✅ **Linux**: cgroups, process namespaces support
+
+**Build System Improvements:**
+- ✅ **Enhanced Makefile**: Full cross-platform support (macOS/Linux/Windows MinGW)
+- ✅ **Architecture Detection**: Automatic ARM64/x86_64 detection on macOS
+- ✅ **Platform-Specific Libraries**: Automatic library linking per platform
+- ✅ **Install/Uninstall Targets**: System-wide installation support
+
+**Bug Fixes & Improvements:**
+- ✅ Fixed Windows compatibility for signal operations (stubs where not supported)
+- ✅ Improved error handling across all OS modules
+- ✅ Enhanced cross-platform path handling
+- ✅ Better memory management in low-level operations
+
 ## [1.0.2] - 2026-02-08
 
 ### 🚀 Standard Library Expansion

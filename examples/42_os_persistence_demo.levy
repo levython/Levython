@@ -1,0 +1,402 @@
+# ============================================================================
+# OS.Persistence Module Demo
+# ============================================================================
+#
+# Demonstrates system persistence management including:
+# - Auto-start entry management
+# - System service status queries
+# - Scheduled task creation
+# - Cross-platform persistence
+#
+# Platform Support: Windows, Linux, macOS
+#
+# WARNING: Some operations require administrator/root privileges.
+# This demo includes safety checks and uses safe test values.
+#
+# Note: Map access in Levython requires literal string keys.
+#       Variable-based key access (map[var]) is not supported.
+#
+# Run with: ./levython examples/34_os_persistence_demo.levy
+# ============================================================================
+
+import os
+
+say("================================================================")
+say("       OS.Persistence Module Demo")
+say("       System Persistence Management")
+say("================================================================")
+say("")
+say("Platform: " + os.name())
+say("")
+
+persist <- os.Persistence
+priv <- os.Privileges
+
+# Check current privilege level
+is_elevated <- priv.is_elevated()
+say("Elevated/Admin: " + str(is_elevated))
+say("")
+
+# ============================================================================
+# Section 1: List Current Auto-Start Entries
+# ============================================================================
+
+say("--- Section 1: List Current Auto-Start Entries ---")
+say("")
+
+try {
+    say("Listing USER auto-start entries...")
+    user_entries <- persist.list_autostart("USER")
+
+    if len(user_entries) == 0 {
+        say("  No user auto-start entries found")
+    } else {
+        say("  Found " + str(len(user_entries)) + " entries:")
+        count <- 0
+        for entry in user_entries {
+            if count < 10 {
+                say("    Name:    " + entry["name"])
+                say("    Command: " + entry["command"])
+                say("    Enabled: " + str(entry["enabled"]))
+                say("")
+            }
+            count <- count + 1
+        }
+        if count > 10 {
+            say("    ... and " + str(count - 10) + " more entries")
+        }
+    }
+
+    # Try listing system entries (may require admin)
+    if is_elevated {
+        say("Listing SYSTEM auto-start entries...")
+        sys_entries <- persist.list_autostart("SYSTEM")
+        say("  Found " + str(len(sys_entries)) + " system entries")
+    } else {
+        say("(Skipping SYSTEM auto-start listing - requires elevation)")
+    }
+
+} catch e {
+    say("Auto-start listing error: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 2: Auto-Start Management Demo
+# ============================================================================
+
+say("--- Section 2: Auto-Start Management ---")
+say("")
+
+test_name <- "LevythonDemoTest"
+
+try {
+    say("Adding test auto-start entry...")
+    say("  Name: " + test_name)
+    say("  Location: USER")
+
+    result <- persist.add_autostart(test_name, "echo LevythonDemo", "USER")
+
+    if result {
+        say("  [OK] Auto-start entry added successfully")
+
+        # Verify it was added
+        entries <- persist.list_autostart("USER")
+        found <- false
+        for entry in entries {
+            if entry["name"] == test_name {
+                found <- true
+                say("  [OK] Verified: entry exists in auto-start list")
+            }
+        }
+
+        if not found {
+            say("  [NOTE] Entry not found in list (may be platform-specific)")
+        }
+
+        # Now remove it
+        say("")
+        say("Removing test auto-start entry...")
+        removed <- persist.remove_autostart(test_name, "USER")
+
+        if removed {
+            say("  [OK] Auto-start entry removed successfully")
+        } else {
+            say("  [WARN] Removal returned false")
+        }
+    } else {
+        say("  [WARN] add_autostart returned false")
+    }
+
+} catch e {
+    say("Auto-start management error: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 3: Service Status Query
+# ============================================================================
+
+say("--- Section 3: Service Status Query ---")
+say("")
+
+try {
+    # Query common service names
+    if os.name() == "Windows" {
+        service_names <- ["Spooler", "wuauserv", "W32Time"]
+    } else {
+        service_names <- ["sshd", "cron", "NetworkManager"]
+    }
+
+    say("Querying service statuses...")
+    say("")
+
+    for svc_name in service_names {
+        try {
+            status <- persist.get_service_status(svc_name)
+            say("  Service: " + svc_name)
+            say("    Status: " + status["status"])
+            say("")
+        } catch e {
+            say("  Service '" + svc_name + "': " + e)
+            say("")
+        }
+    }
+
+} catch e {
+    say("Service status query error: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 4: Service Management Demo (Elevated Only)
+# ============================================================================
+
+say("--- Section 4: Service Management ---")
+say("")
+
+if is_elevated {
+    test_svc <- "levython_demo_svc"
+
+    try {
+        say("Installing test service...")
+        say("  Name: " + test_svc)
+
+        success <- persist.install_service(
+            test_svc,
+            "Levython Demo Service",
+            "Test service for PersistenceHandler demo",
+            "echo LevythonService",
+            false
+        )
+
+        if success {
+            say("  [OK] Service installed")
+
+            # Check status
+            status <- persist.get_service_status(test_svc)
+            say("  Status: " + status["status"])
+
+            # Try starting
+            try {
+                persist.start_service(test_svc)
+                say("  [OK] Service start attempted")
+            } catch e {
+                say("  [NOTE] Service start: " + e)
+            }
+
+            # Stop the service
+            try {
+                persist.stop_service(test_svc)
+                say("  [OK] Service stopped")
+            } catch e {
+                say("  [NOTE] Service stop: " + e)
+            }
+
+            # Uninstall
+            say("")
+            say("Uninstalling test service...")
+            removed <- persist.uninstall_service(test_svc)
+            if removed {
+                say("  [OK] Service uninstalled")
+            } else {
+                say("  [WARN] Service uninstall returned false")
+            }
+        } else {
+            say("  [WARN] install_service returned false")
+        }
+
+    } catch e {
+        say("Service management error: " + e)
+        # Clean up on error
+        try {
+            persist.uninstall_service(test_svc)
+        } catch e2 {
+            # ignore cleanup errors
+        }
+    }
+
+} else {
+    say("(Skipping service management demo - requires elevation)")
+    say("")
+    if os.name() == "Windows" {
+        say("  Run as Administrator to test service management")
+    } else {
+        say("  Run with sudo to test service management")
+    }
+}
+
+say("")
+
+# ============================================================================
+# Section 5: Scheduled Task Management
+# ============================================================================
+
+say("--- Section 5: Scheduled Task Management ---")
+say("")
+
+task_name <- "LevythonDemoTask"
+
+try {
+    say("Adding scheduled task...")
+    say("  Name:     " + task_name)
+    say("  Schedule: DAILY")
+    say("  Time:     23:59")
+
+    result <- persist.add_scheduled_task(
+        task_name,
+        "echo LevythonScheduledTask",
+        "DAILY",
+        "23:59"
+    )
+
+    if result {
+        say("  [OK] Scheduled task created")
+
+        # Give system a moment
+        os.sleep(0.5)
+
+        # Remove the task
+        say("")
+        say("Removing scheduled task...")
+        removed <- persist.remove_scheduled_task(task_name)
+
+        if removed {
+            say("  [OK] Scheduled task removed")
+        } else {
+            say("  [WARN] Task removal returned false")
+        }
+    } else {
+        say("  [WARN] add_scheduled_task returned false")
+    }
+
+} catch e {
+    say("Scheduled task error: " + e)
+    # Try cleanup
+    try {
+        persist.remove_scheduled_task(task_name)
+    } catch e2 {
+        # ignore
+    }
+}
+
+say("")
+
+# ============================================================================
+# Section 6: Schedule Types Demo
+# ============================================================================
+
+say("--- Section 6: Schedule Types ---")
+say("")
+
+say("Supported schedule types:")
+say("  DAILY    - Run every day at specified time")
+say("  WEEKLY   - Run every week at specified time")
+say("  ON_BOOT  - Run on system boot")
+say("  ON_LOGON - Run on user logon")
+
+if os.name() == "Windows" {
+    say("  ONCE     - Run once (Windows only)")
+    say("  MONTHLY  - Run monthly (Windows only)")
+    say("  ON_IDLE  - Run when idle (Windows only)")
+}
+
+say("")
+
+# ============================================================================
+# Section 7: Auto-Start with Levython Script
+# ============================================================================
+
+say("--- Section 7: Auto-Start Levython Script Pattern ---")
+say("")
+
+say("Example: How to auto-start a Levython script")
+say("")
+say("  # Add to auto-start")
+say("  persist.add_autostart('MyScript', './levython my_script.levy', 'USER')")
+say("")
+say("  # Remove when no longer needed")
+say("  persist.remove_autostart('MyScript', 'USER')")
+
+say("")
+
+# ============================================================================
+# Section 8: Platform-Specific Information
+# ============================================================================
+
+say("--- Section 8: Platform-Specific Info ---")
+say("")
+
+if os.name() == "Windows" {
+    say("Windows Persistence Locations:")
+    say("  Auto-Start (USER):   HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+    say("  Auto-Start (SYSTEM): HKLM\\Software\\Microsoft\\Windows\\CurrentVersion\\Run")
+    say("  Services:            Service Control Manager (SCM)")
+    say("  Scheduled Tasks:     Task Scheduler (schtasks)")
+} else {
+    say("Linux/macOS Persistence Locations:")
+    say("  Auto-Start (USER):   ~/.config/autostart/ (.desktop files)")
+    say("  Auto-Start (SYSTEM): /etc/xdg/autostart/ (.desktop files)")
+    say("  Services:            systemd (/etc/systemd/system/)")
+    say("  Scheduled Tasks:     cron (crontab)")
+}
+
+say("")
+
+# ============================================================================
+# Summary
+# ============================================================================
+
+say("================================================================")
+say("                    Demo Complete")
+say("================================================================")
+say("")
+say("PersistenceHandler features demonstrated:")
+say("  1. Auto-start entry listing")
+say("  2. Auto-start add/remove")
+say("  3. Service status queries")
+
+if is_elevated {
+    say("  4. Service install/start/stop/uninstall")
+} else {
+    say("  4. Service management (skipped - requires elevation)")
+}
+
+say("  5. Scheduled task add/remove")
+say("  6. Schedule types overview")
+say("  7. Levython script auto-start pattern")
+say("  8. Platform-specific persistence locations")
+say("")
+say("Platform:  " + os.name())
+say("Elevated:  " + str(is_elevated))
+say("")
+
+if not is_elevated {
+    say("[NOTE] Run with elevated/admin privileges for full demo coverage.")
+}
+
+say("")
+say("================================================================")

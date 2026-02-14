@@ -11,6 +11,40 @@ $script:BuildDir = Join-Path $script:ProjectRoot "build"
 $script:ReleaseDir = Join-Path $script:ProjectRoot "releases"
 $script:InstallerDir = $PSScriptRoot
 $script:Version = "1.0.2"
+$script:AnimationJob = $null
+
+# Cleanup handler for when script exits
+$script:CleanupHandler = {
+    Stop-LoadingAnimation
+}
+
+# Register cleanup on exit
+Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action $script:CleanupHandler | Out-Null
+
+# Braille loading animation
+function Start-LoadingAnimation {
+    param([string]$Message = "Working...")
+    
+    $script:AnimationJob = Start-Job -ScriptBlock {
+        param($msg)
+        $braille = @("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+        $i = 0
+        while ($true) {
+            Write-Host "`r$($braille[$i]) $msg" -NoNewline -ForegroundColor Cyan
+            $i = ($i + 1) % $braille.Count
+            Start-Sleep -Milliseconds 100
+        }
+    } -ArgumentList $Message
+}
+
+function Stop-LoadingAnimation {
+    if ($script:AnimationJob) {
+        Stop-Job -Job $script:AnimationJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $script:AnimationJob -ErrorAction SilentlyContinue
+        Write-Host "`r" -NoNewline
+        $script:AnimationJob = $null
+    }
+}
 
 # Determine architectures to build
 if ($Architecture -eq "both") {
@@ -150,7 +184,8 @@ function Build-Executable {
                 $objFiles += $objFile
                 
                 Write-Host ("") -NoNewline
-                Write-Host ("  [$fileNum/$totalFiles] Compiling $fileName.cpp...") -ForegroundColor Yellow -NoNewline
+                Write-Host ("  [$fileNum/$totalFiles] ") -ForegroundColor Yellow -NoNewline
+                Start-LoadingAnimation "Compiling $fileName.cpp..."
                 $startTime = Get-Date
                 
                 # Compile WITHOUT LTO to speed up individual compilation, add LTO only at link time
@@ -161,10 +196,9 @@ function Build-Executable {
                 )
                 if ($archFlag) { $compileArgs = @($archFlag) + $compileArgs }
                 
-                # Show command being run
-                Write-Host (" (g++ " + ($compileArgs -join " ") + ")") -ForegroundColor DarkGray
-                
                 $compileOutput = & g++ $compileArgs 2>&1
+                Stop-LoadingAnimation
+                
                 if ($LASTEXITCODE -ne 0) {
                     Write-Host ""
                     Write-Host $compileOutput
@@ -172,12 +206,12 @@ function Build-Executable {
                 }
                 
                 $elapsed = ((Get-Date) - $startTime).TotalSeconds
-                Write-Host ("         [OK] Done in " + [math]::Round($elapsed, 1) + "s") -ForegroundColor Green
+                Write-Host ("        ✓ Compiled $fileName.cpp in " + [math]::Round($elapsed, 1) + "s") -ForegroundColor Green
             }
             
             # Link all object files with LTO
-            Write-Host ("") -NoNewline
-            Write-Host ("  [LINK] Linking with LTO optimization...") -ForegroundColor Yellow -NoNewline
+            Write-Host ("  [LINK] ") -ForegroundColor Yellow -NoNewline
+            Start-LoadingAnimation "Linking with LTO optimization (may take 5-10 min)..."
             $linkStartTime = Get-Date
             
             $linkArgs = @(
@@ -187,9 +221,9 @@ function Build-Executable {
             ) + $objFiles + @("-llibssl","-llibcrypto","-lws2_32","-lcrypt32")
             if ($archFlag) { $linkArgs = @($archFlag) + $linkArgs }
             
-            Write-Host (" (this may take 5-10 min on slow PCs)") -ForegroundColor DarkGray
-            
             $linkOutput = & g++ $linkArgs 2>&1
+            Stop-LoadingAnimation
+            
             if ($LASTEXITCODE -ne 0) {
                 Write-Host ""
                 Write-Host $linkOutput
@@ -197,7 +231,7 @@ function Build-Executable {
             }
             
             $linkElapsed = ((Get-Date) - $linkStartTime).TotalSeconds
-            Write-Host ("         [OK] Linked in " + [math]::Round($linkElapsed, 1) + "s") -ForegroundColor Green
+            Write-Host ("        ✓ Linked successfully in " + [math]::Round($linkElapsed, 1) + "s") -ForegroundColor Green
         }
         "msvc" {
             $vcvarsall = Join-Path $compiler.VsPath "VC\Auxiliary\Build\vcvarsall.bat"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # ============================================================================
-# Levython v1.0.2 Release Build Script
+# Levython v1.0.3 Release Build Script
 # ============================================================================
 # This script builds optimized Levython binaries for Linux and macOS.
 # Automatically detects the platform and uses appropriate compiler flags.
@@ -8,7 +8,7 @@
 
 set -e
 
-VERSION="1.0.2"
+VERSION="1.0.3"
 BUILD_DIR="build"
 RELEASE_DIR="releases"
 

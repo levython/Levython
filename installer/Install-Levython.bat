@@ -10,7 +10,7 @@ echo  ╔═══════════════════════�
 echo  ║            LEVYTHON - Professional Windows Installer              ║
 echo  ╠═══════════════════════════════════════════════════════════════════╣
 echo  ║  High Performance Programming Language                            ║
-echo  ║  Version: 1.0.2                                                   ║
+echo  ║  Version: 1.0.3                                                   ║
 echo  ║  Engine: JIT-Compiled Bytecode VM with NaN-boxing                 ║
 echo  ╚═══════════════════════════════════════════════════════════════════╝
 echo.

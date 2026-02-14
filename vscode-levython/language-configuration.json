@@ -11,8 +11,8 @@
         { "open": "{", "close": "}" },
         { "open": "[", "close": "]" },
         { "open": "(", "close": ")" },
-        { "open": "\"", "close": "\"", "notIn": ["string"] },
-        { "open": "'", "close": "'", "notIn": ["string"] }
+        { "open": "\"", "close": "\"", "notIn": ["string", "comment"] },
+        { "open": "'", "close": "'", "notIn": ["string", "comment"] }
     ],
     "surroundingPairs": [
         ["{", "}"],
@@ -22,8 +22,8 @@
         ["'", "'"]
     ],
     "indentationRules": {
-        "increaseIndentPattern": "^.*(\\{|\\[)\\s*$",
-        "decreaseIndentPattern": "^\\s*(\\}|\\])\\s*$"
+        "increaseIndentPattern": "^.*((\\bact\\b|\\bif\\b|\\belse\\b|\\bwhile\\b|\\bfor\\b|\\bclass\\b|\\btry\\b|\\bcatch\\b).*|\\{|\\[)\\s*$",
+        "decreaseIndentPattern": "^\\s*(\\}|\\]|\\belse\\b|\\bcatch\\b).*$"
     },
     "folding": {
         "markers": {
@@ -31,5 +31,15 @@
             "end": "^\\s*#\\s*endregion\\b"
         }
     },
-    "wordPattern": "[a-zA-Z_][a-zA-Z0-9_]*"
+    "wordPattern": "(-?\\d*\\.\\d\\w*)|([^\\`\\~\\!\\@\\#\\%\\^\\&\\*\\(\\)\\-\\=\\+\\[\\{\\]\\}\\\\\\|\\;\\:\\'\\\"\\,\\.\\<\\>\\/\\?\\s]+)",
+    "onEnterRules": [
+        {
+            "beforeText": "^\\s*(?:act|if|else|while|for|class|try|catch).*:\\s*$",
+            "action": { "indent": "indent" }
+        },
+        {
+            "beforeText": "^\\s*#.*$",
+            "action": { "indent": "none", "appendText": "# " }
+        }
+    ]
 }

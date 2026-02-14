@@ -24,7 +24,7 @@ $script:ProjectRoot = Split-Path -Parent $PSScriptRoot
 $script:BuildDir = Join-Path $script:ProjectRoot "build"
 $script:ReleaseDir = Join-Path $script:ProjectRoot "releases"
 $script:InstallerDir = $PSScriptRoot
-$script:Version = "1.0.2"
+$script:Version = "1.0.3"
 
 # Detect architecture
 if ($Architecture -eq "auto") {

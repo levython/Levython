@@ -1,0 +1,201 @@
+# ============================================================================
+# Simple Interactive Piano
+# ============================================================================
+#
+# Play piano by typing keys!
+#
+# Run with: ./levython examples/40_simple_piano.levy
+# ============================================================================
+
+import os
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║              Simple Interactive Piano Game                 ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+
+# Piano notes
+notes <- {
+    "a": ["C4", 261.63],
+    "s": ["D4", 293.66],
+    "d": ["E4", 329.63],
+    "f": ["F4", 349.23],
+    "g": ["G4", 392.00],
+    "h": ["A4", 440.00],
+    "j": ["B4", 493.88],
+    "k": ["C5", 523.25],
+    "l": ["D5", 587.33],
+    
+    "w": ["C#4", 277.18],
+    "e": ["D#4", 311.13],
+    "t": ["F#4", 369.99],
+    "y": ["G#4", 415.30],
+    "u": ["A#4", 466.16]
+}
+
+# Display keyboard
+say("Piano Keyboard Layout:")
+say("")
+say("┌─────────────────────────────────────────────┐")
+say("│   W   E       T   Y   U    (Black Keys)       │")
+say("│  ┌─┬─┬─┐   ┌─┬─┬─┬─┬─┐                        │")
+say("│  │ │ │ │   │ │ │ │ │ │                          │")
+say("│  A─┴S┴─D   F─┴G┴─H┴─J┴─K   L                    │")
+say("│  C4  D4 E4 F4  G4  A4  B4 C5 D5               │")
+say("└───────────────────────────────────────────── ┘")
+say("")
+
+# Help
+say("How to play:")
+say("  - Type a letter (a-l for white keys, w/e/t/y/u for black)")
+say("  - Press Enter to play the note")
+say("  - Type 'scale' to play a scale")
+say("  - Type 'chord' to play a chord")
+say("  - Type 'song' to play 'Twinkle Twinkle'")
+say("  - Type 'q' or 'quit' to exit")
+say("")
+
+# Play a note
+act play_note(key) {
+    if notes[key] != none {
+        note_info <- notes[key]
+        name <- note_info[0]
+        freq <- note_info[1]
+        
+        say("♪ Playing " + name + " (" + str(freq) + " Hz)")
+        os.Audio.play_tone(freq, 0.5, 0.5)
+        -> true
+    }
+    -> false
+}
+
+# Play scale
+act play_scale() {
+    say("🎵 Playing C Major Scale...")
+    scale_keys <- ["a", "s", "d", "f", "g", "h", "j", "k"]
+    
+    for key in scale_keys {
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, 0.4, 0.5)
+            os.sleep(0.45)
+        }
+    }
+    say("✓ Scale complete!")
+}
+
+# Play chord
+act play_chord() {
+    say("♫ Playing C Major Chord (C-E-G)...")
+    
+    # C4
+    os.Audio.play_tone(261.63, 0.8, 0.35)
+    os.sleep(0.02)
+    # E4  
+    os.Audio.play_tone(329.63, 0.8, 0.35)
+    os.sleep(0.02)
+    # G4
+    os.Audio.play_tone(392.00, 0.8, 0.35)
+    
+    os.sleep(0.9)
+    say("✓ Chord complete!")
+}
+
+# Play song
+act play_song() {
+    say("🎵 Playing 'Twinkle Twinkle Little Star'...")
+    say("")
+    
+    # First line
+    melody1 <- ["a", "a", "h", "h", "j", "j", "h"]
+    say("♫ Twinkle twinkle little star...")
+    
+    for key in melody1 {
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, 0.4, 0.45)
+            os.sleep(0.45)
+        }
+    }
+    
+    os.sleep(0.3)
+    
+    # Second line
+    melody2 <- ["g", "g", "f", "f", "d", "d", "a"]
+    say("♫ How I wonder what you are...")
+    
+    for key in melody2 {
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, 0.4, 0.45)
+            os.sleep(0.45)
+        }
+    }
+    
+    say("")
+    say("✓ Song complete!")
+}
+
+# Main game loop
+say("🎹 Piano ready! Start playing...")
+say("")
+
+running <- true
+note_count <- 0
+
+while running {
+    # Prompt for input
+    input <- input("Press a key (or command): ")
+    
+    # Convert to lowercase
+    key <- os.lower(input)
+    
+    # Check for quit
+    if key == "q" or key == "quit" or key == "exit" {
+        running <- false
+        say("👋 Goodbye!")
+    }
+    # Check for commands
+    else if key == "scale" {
+        play_scale()
+        say("")
+    }
+    else if key == "chord" {
+        play_chord()
+        say("")
+    }
+    else if key == "song" {
+        play_song()
+        say("")
+    }
+    else if key == "help" {
+        say("Commands: scale, chord, song, q/quit")
+        say("Keys: a s d f g h j k l (white) | w e t y u (black)")
+        say("")
+    }
+    # Play note
+    else {
+        if play_note(key) {
+            note_count <- note_count + 1
+        } else {
+            say("❌ Unknown key. Try: a-l, w/e/t/y/u, or type 'help'")
+        }
+        say("")
+    }
+}
+
+say("")
+say("╔════════════════════════════════════════════════════════════╗")
+say("║  Thanks for playing! You played " + str(note_count) + " notes!              ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+say("🎵 Keep making music! 🎵")

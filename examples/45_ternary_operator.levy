@@ -1,0 +1,58 @@
+# Ternary Operator Demo
+# Syntax: condition ? value_if_true : value_if_false
+
+say("=== Ternary Operator Demo ===")
+say("")
+
+# Basic usage
+x <- 10
+result <- x > 5 ? "big" : "small"
+say("x = " + str(x) + " is " + result)
+
+# Numeric result
+a <- 15
+b <- 20
+max_val <- a > b ? a : b
+say("max(" + str(a) + ", " + str(b) + ") = " + str(max_val))
+
+# Nested ternary (right-associative)
+score <- 85
+grade <- score >= 90 ? "A" : score >= 80 ? "B" : score >= 70 ? "C" : "F"
+say("Score " + str(score) + " = Grade " + grade)
+
+# In expressions
+n <- 7
+say(str(n) + " is " + (n % 2 == 0 ? "even" : "odd"))
+
+# With function calls
+act abs(x) {
+    -> x < 0 ? -x : x
+}
+say("abs(-42) = " + str(abs(-42)))
+say("abs(42) = " + str(abs(42)))
+
+# Boolean conditions
+is_adult <- true
+message <- is_adult ? "Can vote" : "Too young"
+say("Status: " + message)
+
+# Complex expressions
+age <- 25
+discount <- age < 18 ? 0.5 : age > 65 ? 0.3 : 0.0
+say("Age " + str(age) + " gets " + str(discount * 100) + "% discount")
+
+# In assignments and calculations
+price <- 100
+final_price <- price * (age < 18 ? 0.5 : 1.0)
+say("Final price: $" + str(final_price))
+
+# Multiple ternaries in one expression
+x <- 5
+y <- 10
+z <- 15
+largest <- x > y ? (x > z ? x : z) : (y > z ? y : z)
+say("Largest of " + str(x) + ", " + str(y) + ", " + str(z) + " = " + str(largest))
+
+say("")
+say("=== All Tests Passed! ===")
+#

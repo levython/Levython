@@ -1,0 +1,415 @@
+# ============================================================================
+# OS.Privileges Demo - Privilege Elevation Examples
+# ============================================================================
+#
+# This demo showcases the OS.Privileges module for managing
+# privilege elevation and administrative access in Levython scripts.
+#
+# Platform Support: Windows, macOS, Linux
+# Security Level: High - use with caution
+#
+# Run with: ./levython examples/30_os_privileges_demo.levy
+# ============================================================================
+
+import os
+
+priv <- os.Privileges
+
+say("=============================================================================")
+say("              OS.Privileges Module Demo")
+say("=============================================================================")
+say("")
+
+# ============================================================================
+# Section 1: Privilege Checking
+# ============================================================================
+
+say("--- Section 1: Privilege Checking ---")
+say("")
+
+say("[*] Checking current privilege status...")
+is_elevated <- priv.is_elevated()
+is_admin <- priv.is_admin()
+is_root <- priv.is_root()
+level <- priv.get_level()
+can_elevate <- priv.can_elevate()
+
+say("    Elevated:      " + str(is_elevated))
+say("    Administrator: " + str(is_admin))
+say("    Root/SYSTEM:   " + str(is_root))
+say("    Level:         " + level)
+say("    Can Elevate:   " + str(can_elevate))
+
+if level == "STANDARD_USER" {
+    say("")
+    say("[!] Running as standard user with limited privileges")
+} else if level == "ELEVATED_USER" {
+    say("")
+    say("[+] Running with elevated user privileges (UAC on Windows)")
+} else if level == "ADMINISTRATOR" {
+    say("")
+    say("[+] Running with full administrator/root privileges")
+} else if level == "SYSTEM" {
+    say("")
+    say("[+] Running as SYSTEM account (highest Windows privileges)")
+}
+
+say("")
+
+# ============================================================================
+# Section 2: User Information
+# ============================================================================
+
+say("--- Section 2: User Information ---")
+say("")
+
+say("[*] Getting current user information...")
+try {
+    user <- priv.get_user_info()
+
+    say("    Username:        " + user["username"])
+    say("    Full Name:       " + user["full_name"])
+    say("    User ID:         " + str(user["user_id"]))
+    say("    Group ID:        " + str(user["group_id"]))
+    say("    Is Admin:        " + str(user["is_admin"]))
+    say("    Is Elevated:     " + str(user["is_elevated"]))
+    say("    Privilege Level: " + user["privilege_level"])
+    say("    Home Directory:  " + user["home_directory"])
+
+    say("")
+    say("    Group Memberships:")
+    groups <- user["groups"]
+    for group in groups {
+        say("      - " + group)
+    }
+} catch e {
+    say("[ERROR] Failed to get user info: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 3: Token Information (Platform-Specific)
+# ============================================================================
+
+say("--- Section 3: Token Information ---")
+say("")
+
+say("[*] Getting security token information...")
+try {
+    token <- priv.get_token_info()
+    platform <- os.name()
+
+    if platform == "Windows" {
+        say("    Platform:         Windows")
+        say("    Elevated:         " + str(token["is_elevated"]))
+        say("    Elevation Type:   " + token["elevation_type"])
+        say("    Integrity Level:  " + str(token["integrity_level"]))
+        say("    Integrity Name:   " + token["integrity_name"])
+
+        say("")
+        say("    Token Privileges:")
+        privileges <- token["privileges"]
+        shown <- 0
+        for priv_obj in privileges {
+            if shown < 10 {
+                enabled_str <- "[DISABLED]"
+                if priv_obj["enabled"] {
+                    enabled_str <- "[ENABLED] "
+                }
+                say("      " + enabled_str + " " + priv_obj["name"])
+                shown <- shown + 1
+            }
+        }
+
+        if len(privileges) > 10 {
+            say("      ... (" + str(len(privileges) - 10) + " more privileges)")
+        }
+    } else {
+        say("    Platform:        Unix/Linux")
+        say("    Real UID:        " + str(token["real_uid"]))
+        say("    Effective UID:   " + str(token["effective_uid"]))
+        say("    Real GID:        " + str(token["real_gid"]))
+        say("    Effective GID:   " + str(token["effective_gid"]))
+        say("    Elevated:        " + str(token["is_elevated"]))
+        say("    SETUID Binary:   " + str(token["is_setuid"]))
+    }
+} catch e {
+    say("[ERROR] Failed to get token info: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 4: Privilege Management (Windows-Specific)
+# ============================================================================
+
+say("--- Section 4: Privilege Management ---")
+say("")
+
+if os.name() == "Windows" {
+    say("[*] Testing Windows privilege management...")
+
+    privileges_to_check <- [
+        "SeDebugPrivilege",
+        "SeBackupPrivilege",
+        "SeRestorePrivilege",
+        "SeShutdownPrivilege",
+        "SeTakeOwnershipPrivilege"
+    ]
+
+    say("")
+    say("    Checking common privileges:")
+    for priv_name in privileges_to_check {
+        try {
+            has_priv <- priv.check(priv_name)
+            status <- "[x] DISABLED"
+            if has_priv {
+                status <- "[+] ENABLED "
+            }
+            say("      " + status + " " + priv_name)
+        } catch e {
+            say("      [?] UNKNOWN  " + priv_name + " (" + e + ")")
+        }
+    }
+
+    if is_elevated {
+        say("")
+        say("[*] Attempting to enable SeBackupPrivilege...")
+        try {
+            success <- priv.enable("SeBackupPrivilege")
+            if success {
+                say("    [+] Successfully enabled SeBackupPrivilege")
+                say("    [*] Can now backup files bypassing ACLs")
+            } else {
+                say("    [x] Failed to enable SeBackupPrivilege")
+            }
+        } catch e {
+            say("    [ERROR] " + e)
+        }
+    } else {
+        say("")
+        say("[!] Not elevated - cannot demonstrate privilege enabling")
+        say("    Run this script as administrator to see privilege management")
+    }
+} else {
+    say("[*] Privilege management is Windows-specific")
+    say("    Unix systems use UID-based permissions (root vs user)")
+
+    if is_root {
+        say("    [+] Running as root - have all privileges")
+    } else {
+        say("    [!] Not running as root - limited privileges")
+    }
+}
+
+say("")
+
+# ============================================================================
+# Section 5: Elevation Capability
+# ============================================================================
+
+say("--- Section 5: Elevation Capability ---")
+say("")
+
+if not is_elevated {
+    say("[*] Script is not currently elevated")
+
+    if can_elevate {
+        say("    [+] User can request elevation")
+        say("    [*] Elevation methods available:")
+
+        if os.name() == "Windows" {
+            say("        - UAC prompt via request_elevation()")
+            say("        - Restart elevated via elevate_and_restart()")
+            say("        - Run commands as admin via run_as_admin()")
+        } else {
+            say("        - Run script with: sudo levython script.levy")
+            say("        - Run commands via: priv.run_as_admin(command)")
+        }
+    } else {
+        say("    [x] User cannot request elevation")
+        say("    [!] Not a member of administrators/sudo group")
+    }
+} else {
+    say("[+] Script is already running with elevated privileges")
+    say("")
+    say("[*] Testing privilege drop capability...")
+    say("    [!] Note: This would actually drop privileges")
+    say("    [*] Commented out for demo safety")
+}
+
+say("")
+
+# ============================================================================
+# Section 6: Command Execution as Administrator
+# ============================================================================
+
+say("--- Section 6: Administrative Command Execution ---")
+say("")
+
+say("[*] Demonstrating run_as_admin() function...")
+
+if os.name() == "Windows" {
+    say("    Platform: Windows")
+    say("    [*] Example commands that could be run:")
+    say("        - netsh (network configuration)")
+    say("        - reg (registry editing)")
+    say("        - icacls (file permissions)")
+    say("        - sc (service control)")
+    say("")
+    say("    [!] Demo mode - not actually executing")
+    say("    [*] To run a command as admin:")
+    say("        result <- priv.run_as_admin('cmd', ['/c', 'echo', 'Hello'])")
+} else {
+    say("    Platform: Unix/Linux")
+    say("    [*] Example commands that could be run with sudo:")
+    say("        - systemctl (service management)")
+    say("        - apt/yum (package management)")
+    say("        - chmod/chown (permission changes)")
+    say("        - mount/umount (filesystem mounting)")
+    say("")
+    say("    [!] Demo mode - not actually executing")
+    say("    [*] To run a command as admin:")
+    say("        result <- priv.run_as_admin('ls', ['-la', '/root'])")
+}
+
+say("")
+
+# ============================================================================
+# Section 7: Security Best Practices
+# ============================================================================
+
+say("--- Section 7: Security Best Practices ---")
+say("")
+
+say("[*] Security recommendations for privilege escalation:")
+say("")
+say("    1. Principle of Least Privilege:")
+say("       - Request elevation only when necessary")
+say("       - Drop privileges immediately after admin tasks")
+say("       - Run most code with standard privileges")
+say("")
+say("    2. User Communication:")
+say("       - Clearly explain WHY elevation is needed")
+say("       - Provide descriptive reasons in request_elevation()")
+say("       - Handle elevation denials gracefully")
+say("")
+say("    3. Input Validation:")
+say("       - Validate all user inputs before elevated operations")
+say("       - Sanitize command arguments in run_as_admin()")
+say("       - Never trust external data in privileged contexts")
+say("")
+say("    4. Audit Logging:")
+say("       - Log all elevation attempts and results")
+say("       - Record privileged operations for security review")
+say("       - Track who, what, when, and why for admin actions")
+say("")
+say("    5. Error Handling:")
+say("       - Always check can_elevate() before requesting")
+say("       - Handle UAC cancellations appropriately")
+say("       - Provide fallback behavior for non-admin users")
+say("")
+
+# ============================================================================
+# Section 8: Common Usage Patterns
+# ============================================================================
+
+say("--- Section 8: Common Usage Patterns ---")
+say("")
+
+say("[*] Pattern 1: Check and request elevation")
+say("")
+say("    if not priv.is_elevated() {")
+say("        if priv.can_elevate() {")
+say("            success <- priv.request_elevation('Need admin for config')")
+say("            if not success {")
+say("                say('User declined elevation')")
+say("            }")
+say("        }")
+say("    }")
+say("")
+
+say("[*] Pattern 2: Elevate and restart")
+say("")
+say("    if not priv.is_elevated() {")
+say("        say('Restarting with elevation...')")
+say("        priv.elevate_and_restart(['--continue'])")
+say("    }")
+say("    say('Now running elevated')")
+say("")
+
+say("[*] Pattern 3: Secure admin operation")
+say("")
+say("    if not priv.is_elevated() {")
+say("        priv.request_elevation('System configuration')")
+say("    }")
+say("    # Perform admin work, then drop privileges")
+say("    priv.drop()")
+say("")
+
+# ============================================================================
+# Section 9: Platform-Specific Considerations
+# ============================================================================
+
+say("--- Section 9: Platform-Specific Considerations ---")
+say("")
+
+say("[*] Windows:")
+say("    - Uses UAC (User Account Control) for elevation")
+say("    - Supports granular privilege management (SeDebugPrivilege, etc.)")
+say("    - Can programmatically trigger elevation prompts")
+say("    - Integrity levels: Low, Medium, High, System")
+say("    - SYSTEM account = highest privilege level")
+say("")
+
+say("[*] Unix/Linux/macOS:")
+say("    - Uses sudo for elevation (cannot programmatically prompt)")
+say("    - UID-based permissions (root = UID 0)")
+say("    - Must run script with sudo from command line")
+say("    - Group-based capabilities (sudo, wheel, admin groups)")
+say("    - No granular privilege management (root has all)")
+say("")
+
+# ============================================================================
+# Demo Summary
+# ============================================================================
+
+say("=============================================================================")
+say("                         Demo Summary")
+say("=============================================================================")
+say("")
+
+say("[+] Demonstrated privilege checking functions")
+say("[+] Retrieved user information and group memberships")
+say("[+] Examined security token details")
+
+if os.name() == "Windows" {
+    say("[+] Checked Windows-specific privileges")
+}
+
+say("[+] Explained elevation capabilities and methods")
+say("[+] Showed security best practices")
+say("[+] Provided common usage patterns")
+say("")
+
+say("Current Status:")
+say("  Privilege Level: " + level)
+say("  Can Elevate:     " + str(can_elevate))
+
+if not is_elevated and can_elevate {
+    say("")
+    say("[*] To see elevated features, run this script as administrator")
+    if os.name() == "Windows" {
+        say("    Right-click and select 'Run as administrator'")
+    } else {
+        say("    Run: sudo levython 30_os_privilegeescalator_demo.levy")
+    }
+}
+
+say("")
+say("[*] For comprehensive testing, see: 31_os_privilegeescalator_test.levy")
+say("")
+say("=============================================================================")
+say("                    Demo Complete")
+say("=============================================================================")

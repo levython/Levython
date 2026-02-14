@@ -1,0 +1,348 @@
+# ============================================================================
+# LEVYTHON OS.INPUTCONTROL MODULE DEMONSTRATION
+# ============================================================================
+#This example demonstrates the OS.InputControl submodule for comprehensive
+# input system control including keyboard, mouse, and touch automation.
+#
+# ⚠️  WARNING: These APIs control system-level input and may affect
+#    normal system operation. Use with caution and appropriate privileges.
+#
+# Run with: ./levython examples/29_os_inputcontrol_demo.levy
+# ============================================================================
+
+import os
+import input
+
+say("╔════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON OS.INPUTCONTROL DEMONSTRATION                   ║")
+say("╚════════════════════════════════════════════════════════════════════╝")
+say("")
+
+# -----------------------------------------------------------------------------
+# 1. Mouse Control & Automation
+# -----------------------------------------------------------------------------
+say("🖱️  MOUSE CONTROL & AUTOMATION")
+say("   ─────────────────────────────────────────────────────────")
+
+# Get current mouse position
+pos <- os.InputControl.get_mouse_position()
+say("   Current mouse position:")
+say("      X: " + str(pos["x"]))
+say("      Y: " + str(pos["y"]))
+say("")
+
+# Move mouse to specific position
+say("   Moving mouse to (500, 300)...")
+result <- os.InputControl.move_mouse(500, 300)
+say("   Move result: " + str(result))
+say("")
+
+# Verify new position
+new_pos <- os.InputControl.get_mouse_position()
+say("   New mouse position:")
+say("      X: " + str(new_pos["x"]))
+say("      Y: " + str(new_pos["y"]))
+say("")
+
+# Simulate mouse clicks
+say("   Simulating mouse clicks...")
+os.InputControl.click_mouse_button(os.InputControl.MOUSE_LEFT)
+say("   ✓ Left click simulated")
+say("")
+
+# Mouse scrolling
+say("   Simulating mouse scroll...")
+result <- os.InputControl.scroll_mouse(0, 3)  # Scroll up 3 units
+say("   Scroll result: " + str(result))
+say("")
+
+# -----------------------------------------------------------------------------
+# 2. Keyboard Control & Automation
+# -----------------------------------------------------------------------------
+say("⌨️  KEYBOARD CONTROL & AUTOMATION")
+say("   ─────────────────────────────────────────────────────────")
+
+# Send keyboard events
+say("   Sending keyboard events...")
+
+# NEW: Can use character directly (no input.ord() needed!)
+say("   Modern way (character):")
+os.InputControl.tap_key("A")   # Single key tap
+say("   ✓ Key 'A' tapped")
+
+# Or use press/release for more control
+say("   With explicit press/release:")
+os.InputControl.press_key("A")   # Press 'A' key
+os.sleep_ms(50)
+os.InputControl.release_key("A")    # Release 'A' key
+say("   ✓ Key 'A' press/release simulated")
+
+# Or use code (backwards compatible)
+say("   Classic way (code):")
+key_a_code <- input.ord("A")  # Still useful for reference
+os.InputControl.press_key(key_a_code)
+os.sleep_ms(50)
+os.InputControl.release_key(key_a_code)
+say("   ✓ Key 'A' (code: " + str(key_a_code) + ") simulated")
+say("")
+
+# Send text (automated typing)
+say("   Automated typing test:")
+say("   (Typing 'Hello!')...")
+result <- os.InputControl.type_text_raw("Hello!")
+say("   Type result: " + str(result))
+say("")
+
+# Get keyboard state
+say("   Getting keyboard state...")
+key_state <- os.InputControl.get_keyboard_state()
+say("   Keyboard state retrieved (map of pressed keys)")
+say("")
+
+# -----------------------------------------------------------------------------
+# 3. Input Capture & Monitoring
+# -----------------------------------------------------------------------------
+say("📥 INPUT CAPTURE & MONITORING")
+say("   ─────────────────────────────────────────────────────────")
+
+# Check current capture status
+status <- os.InputControl.is_capturing()
+say("   Current capture status:")
+say("      Keyboard: " + str(status["keyboard"]))
+say("      Mouse: " + str(status["mouse"]))
+say("      Touch: " + str(status["touch"]))
+say("")
+
+# Start keyboard capture
+say("   Starting keyboard capture...")
+result <- os.InputControl.capture_keyboard()
+say("   Capture result: " + str(result))
+say("")
+
+# Start mouse capture
+say("   Starting mouse capture...")
+result <- os.InputControl.capture_mouse()
+say("   Capture result: " + str(result))
+say("")
+
+# Check capture status again
+status <- os.InputControl.is_capturing()
+say("   Updated capture status:")
+say("      Keyboard: " + str(status["keyboard"]))
+say("      Mouse: " + str(status["mouse"]))
+say("      Touch: " + str(status["touch"]))
+say("")
+
+# -----------------------------------------------------------------------------
+# 4. Key Blocking & Filtering
+# -----------------------------------------------------------------------------
+say("🚫 KEY BLOCKING & FILTERING")
+say("   ─────────────────────────────────────────────────────────")
+
+# Block specific keys
+say("   Blocking Escape key...")
+os.InputControl.block_key(27)  # ESC key code
+say("   ✓ Escape key blocked")
+say("")
+
+say("   Blocking 'Q' key (using character)...")
+os.InputControl.block_key("Q")  # Can use character directly!
+say("   ✓ 'Q' key blocked")
+say("")
+
+# Block mouse button
+say("   Blocking right mouse button...")
+os.InputControl.block_mouse_button(os.InputControl.MOUSE_RIGHT)
+say("   ✓ Right mouse button blocked")
+say("")
+
+say("   Note: Blocked inputs would be prevented from reaching applications")
+say("")
+
+# -----------------------------------------------------------------------------
+# 5. Key Remapping
+# -----------------------------------------------------------------------------
+say("🔄 KEY REMAPPING")
+say("   ─────────────────────────────────────────────────────────")
+
+# Setup key remapping
+say("   Remapping Caps Lock (20) to Ctrl (17)...")
+os.InputControl.remap_key(20, 17)  # Special keys still use codes
+say("   ✓ Caps Lock remapped to Ctrl")
+say("")
+
+say("   Remapping 'A' to 'B' (using characters)...")
+os.InputControl.remap_key("A", "B")  # Much cleaner!
+say("   ✓ 'A' key remapped to 'B'")
+say("")
+
+say("   Note: Remapped keys would trigger the new key when pressed")
+say("")
+
+# -----------------------------------------------------------------------------
+# 6. Touch Input Simulation (for touch devices)
+# -----------------------------------------------------------------------------
+say("👆 TOUCH INPUT SIMULATION")
+say("   ─────────────────────────────────────────────────────────")
+
+# Start touch capture
+say("   Starting touch capture...")
+result <- os.InputControl.capture_touch()
+say("   Touch capture result: " + str(result))
+say("")
+
+# Simulate touch events
+say("   Simulating touch at (400, 300) with 80% pressure...")
+result <- os.InputControl.send_touch_event(400, 300, 80)
+say("   Touch simulation: " + str(result))
+say("   (Note: Touch simulation requires hardware support)")
+say("")
+
+# -----------------------------------------------------------------------------
+# 7. Input Automation Example - Drawing Pattern
+# -----------------------------------------------------------------------------
+say("🎨 INPUT AUTOMATION EXAMPLE")
+say("   ─────────────────────────────────────────────────────────")
+
+say("   Drawing a square pattern with mouse...")
+
+# Draw a square (100x100 pixels)
+start_x <- 100
+start_y <- 100
+size <- 100
+
+# Move to starting position
+os.InputControl.move_mouse(start_x, start_y)
+os.sleep_ms(100)
+
+# Draw right side
+os.InputControl.move_mouse(start_x + size, start_y)
+os.sleep_ms(100)
+
+# Draw bottom side
+os.InputControl.move_mouse(start_x + size, start_y + size)
+os.sleep_ms(100)
+
+# Draw left side
+os.InputControl.move_mouse(start_x, start_y + size)
+os.sleep_ms(100)
+
+# Draw top side (complete the square)
+os.InputControl.move_mouse(start_x, start_y)
+os.sleep_ms(100)
+
+say("   ✓ Square pattern completed")
+say("")
+
+# -----------------------------------------------------------------------------
+# 8. Automated Text Entry Example
+# -----------------------------------------------------------------------------
+say("📝 AUTOMATED TEXT ENTRY")
+say("   ─────────────────────────────────────────────────────────")
+
+say("   Typing multi-line text...")
+lines <- ["Line 1: Hello from Levython!", "Line 2: OS.InputControl is powerful", "Line 3: Automation made easy"]
+
+i <- 0
+while i < len(lines) {
+    os.InputControl.type_text_raw(lines[i])
+    os.sleep_ms(100)
+    # Simulate Enter key (code 13)
+    os.InputControl.tap_key(13)
+    os.sleep_ms(100)
+    i <- i + 1
+}
+
+say("   ✓ Multi-line text entry completed")
+say("")
+
+# -----------------------------------------------------------------------------
+# 9. Mouse Button Constants Reference
+# -----------------------------------------------------------------------------
+say("🔢 MOUSE BUTTON CONSTANTS")
+say("   ─────────────────────────────────────────────────────────")
+say("   os.InputControl.MOUSE_LEFT   = " + str(os.InputControl.MOUSE_LEFT))
+say("   os.InputControl.MOUSE_RIGHT  = " + str(os.InputControl.MOUSE_RIGHT))
+say("   os.InputControl.MOUSE_MIDDLE = " + str(os.InputControl.MOUSE_MIDDLE))
+say("")
+
+# -----------------------------------------------------------------------------
+# 10. Cleanup & Release
+# -----------------------------------------------------------------------------
+say("🧹 CLEANUP & RELEASE")
+say("   ─────────────────────────────────────────────────────────")
+
+# Unblock keys and buttons
+say("   Unblocking keys...")
+os.InputControl.unblock_key(27)   # Unblock Escape
+os.InputControl.unblock_key("Q")  # Unblock Q (using character!)
+say("   ✓ Escape and Q keys unblocked")
+say("")
+
+say("   Unblocking mouse buttons...")
+os.InputControl.unblock_mouse_button(os.InputControl.MOUSE_RIGHT)
+say("   ✓ Mouse buttons unblocked")
+say("")
+
+# Remove key remappings
+say("   Removing key remappings...")
+os.InputControl.remap_key(20, 0)  # Remove Caps Lock remap
+os.InputControl.remap_key("A", 0)  # Remove 'A' remap (character!)
+say("   ✓ Remappings removed")
+say("")
+
+# Clear input buffers
+say("   Clearing input buffers...")
+os.InputControl.clear_input_buffer()
+say("   ✓ Buffers cleared")
+say("")
+
+# Release captures
+say("   Releasing input captures...")
+os.InputControl.release_keyboard()
+os.InputControl.release_mouse()
+os.InputControl.release_touch()
+say("   ✓ All captures released")
+say("")
+
+# Final status check
+status <- os.InputControl.is_capturing()
+say("   Final capture status:")
+say("      Keyboard: " + str(status["keyboard"]))
+say("      Mouse: " + str(status["mouse"]))
+say("      Touch: " + str(status["touch"]))
+say("")
+
+# -----------------------------------------------------------------------------
+# Use Cases & Examples
+# -----------------------------------------------------------------------------
+say("💡 USE CASES & EXAMPLES")
+say("   ─────────────────────────────────────────────────────────")
+say("   • Automated testing (UI automation, form filling)")
+say("   • Accessibility tools (custom input devices)")
+say("   • Gaming macros & automation")
+say("   • Remote desktop & control applications")
+say("   • Kiosk mode & restricted input")
+say("   • Custom keyboard layouts & remapping")
+say("   • Input recording & playback")
+say("   • Gesture recognition & custom controls")
+say("")
+
+# -----------------------------------------------------------------------------
+# Security & Safety Notice
+# -----------------------------------------------------------------------------
+say("⚠️  SECURITY & SAFETY NOTICE")
+say("   ─────────────────────────────────────────────────────────")
+say("   OS.InputControl provides powerful system-level access:")
+say("      • Requires elevated privileges on most systems")
+say("      • Can interfere with normal system operation")
+say("      • May be blocked by security software")
+say("      • Always release captures when done")
+say("      • Test in safe environments first")
+say("      • Be aware of accessibility implications")
+say("      • Use responsibly and ethically")
+say("")
+
+say("╔════════════════════════════════════════════════════════════════════╗")
+say("║           OS.INPUTCONTROL DEMONSTRATION COMPLETE                   ║")
+say("╚════════════════════════════════════════════════════════════════════╝")

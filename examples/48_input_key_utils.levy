@@ -1,0 +1,266 @@
+# ============================================================================
+# Input Module - ord() and chr() Functions Demo
+# ============================================================================
+# Demonstrates input.ord() and input.chr() - Python-style functions
+# for converting between characters and ASCII codes without memorization.
+#
+# Run with: ./levython examples/39_input_key_utils.levy
+# ============================================================================
+
+import input
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║       Input Module - ord() and chr() Functions Demo       ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+
+# =============================================================================
+# 1. Converting Characters to ASCII Codes with ord()
+# =============================================================================
+say("1. CHARACTER TO ASCII - ord() FUNCTION")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+# Letters
+say("   Letters:")
+key_a <- "a"
+code_a <- input.ord(key_a)
+say("      '" + key_a + "' -> " + str(code_a))
+
+key_A <- "A"
+code_A <- input.ord(key_A)
+say("      '" + key_A + "' -> " + str(code_A))
+
+key_z <- "z"
+code_z <- input.ord(key_z)
+say("      '" + key_z + "' -> " + str(code_z))
+
+say("")
+
+# Numbers
+say("   Numbers:")
+key_0 <- "0"
+code_0 <- input.ord(key_0)
+say("      '" + key_0 + "' -> " + str(code_0))
+
+key_9 <- "9"
+code_9 <- input.ord(key_9)
+say("      '" + key_9 + "' -> " + str(code_9))
+
+say("")
+
+# Special characters
+say("   Special Characters:")
+key_space <- " "
+code_space <- input.ord(key_space)
+say("      'SPACE' -> " + str(code_space))
+
+# For special keys like Enter and ESC, use codes directly
+say("      'ENTER' -> 13 (use chr(13))")
+say("      'NEWLINE' -> 10 (use chr(10))")
+say("      'TAB' -> 9 (use chr(9))")
+say("      'ESC' -> 27 (use chr(27))")
+
+say("")
+
+# Symbols
+say("   Symbols:")
+symbols <- ["!", "@", "#", "$", "%", "&", "*", "(", ")", "-", "+", "="]
+i <- 0
+while i < len(symbols) {
+    sym <- symbols[i]
+    code <- input.ord(sym)
+    say("      '" + sym + "' -> " + str(code))
+    i <- i + 1
+}
+
+say("")
+
+# =============================================================================
+# 2. Converting ASCII Codes to Characters with chr()
+# =============================================================================
+say("2. ASCII TO CHARACTER - chr() FUNCTION")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+# Common ASCII codes
+say("   Common Codes:")
+codes <- [32, 48, 49, 65, 90, 97, 122, 13, 27, 9, 10]
+names <- ["SPACE", "0", "1", "A", "Z", "a", "z", "ENTER", "ESC", "TAB", "NEWLINE"]
+
+i <- 0
+while i < len(codes) {
+    code <- codes[i]
+    name <- names[i]
+    key <- input.chr(code)
+    say("      " + str(code) + " -> '" + key + "' (" + name + ")")
+    i <- i + 1
+}
+
+say("")
+
+# =============================================================================
+# 3. Practical Use Cases
+# =============================================================================
+say("3. PRACTICAL USE CASES")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+# Use case 1: Building a keyboard mapping
+say("   Use Case 1: Building a keyboard note mapping")
+say("")
+
+piano_keys <- {
+    "a": 261.63,  # C4
+    "s": 293.66,  # D4
+    "d": 329.63,  # E4
+    "f": 349.23,  # F4
+    "g": 392.00,  # G4
+    "h": 440.00,  # A4
+    "j": 493.88   # B4
+}
+
+say("   Piano key mappings (key -> frequency):")
+keys_list <- ["a", "s", "d", "f", "g", "h", "j"]
+notes <- ["C4", "D4", "E4", "F4", "G4", "A4", "B4"]
+
+i <- 0
+while i < len(keys_list) {
+    key <- keys_list[i]
+    note <- notes[i]
+    try {
+        freq <- piano_keys[key]
+        code <- input.ord(key)
+        say("      " + note + ":key='" + key + "' (code=" + str(code) + ") -> " + str(freq) + " Hz")
+    } catch error {
+        # Skip
+    }
+    i <- i + 1
+}
+
+say("")
+
+# Use case 2: Working with keyboard shortcuts
+say("   Use Case 2: Keyboard shortcuts")
+say("")
+
+shortcuts <- {
+    "s": "Save",
+    "o": "Open",
+    "n": "New",
+    "q": "Quit",
+    "c": "Copy",
+    "v": "Paste"
+}
+
+say("   Command shortcuts (Ctrl+Key):")
+shortcut_keys <- ["s", "o", "n", "q", "c", "v"]
+i <- 0
+while i < len(shortcut_keys) {
+    key <- shortcut_keys[i]
+    try {
+        action <- shortcuts[key]
+        code <- input.ord(key)
+        say("      Ctrl+" + key + " (code " + str(code) + ") -> " + action)
+    } catch error {
+        # Skip
+    }
+    i <- i + 1
+}
+
+say("")
+
+# Use case 3: Character range checks
+say("   Use Case 3: Character range validation")
+say("")
+
+test_chars <- ["a", "M", "5", " ", "!", "\n"]
+i <- 0
+while i < len(test_chars) {
+    char <- test_chars[i]
+    code <- input.ord(char)
+    
+    type_str <- ""
+    if code >= 97 and code <= 122 {
+        type_str <- "lowercase letter"
+    } else if code >= 65 and code <= 90 {
+        type_str <- "uppercase letter"
+    } else if code >= 48 and code <= 57 {
+        type_str <- "digit"
+    } else if code == 32 {
+        type_str <- "space"
+    } else if code == 10 {
+        type_str <- "newline"
+    } else {
+        type_str <- "special character"
+    }
+    
+    display <- char
+    if code == 10 {
+        display <- "\\n"
+    } else if code == 32 {
+        display <- "' '"
+    }
+    
+    say("      '" + display + "' (code " + str(code) + ") is a " + type_str)
+    i <- i + 1
+}
+
+say("")
+
+# =============================================================================
+# 4. Converting Between Representations
+# =============================================================================
+say("4. ROUND-TRIP CONVERSION")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+say("   Testing round-trip conversion (char -> code -> char):")
+test_keys <- ["A", "z", "0", " ", "!"]
+i <- 0
+while i < len(test_keys) {
+    original_key <- test_keys[i]
+    code <- input.ord(original_key)
+    converted_key <- input.chr(code)
+    
+    match <- "✓"
+    if original_key != converted_key {
+        match <- "✗"
+    }
+    
+    display_orig <- original_key
+    display_conv <- converted_key
+    if code == 32 {
+        display_orig <- "SPACE"
+        display_conv <- "SPACE"
+    }
+    
+    say("      " + match + " '" + display_orig + "' -> " + str(code) + " -> '" + display_conv + "'")
+    i <- i + 1
+}
+
+say("")
+
+# =============================================================================
+# Summary
+# =============================================================================
+say("╔════════════════════════════════════════════════════════════╗")
+say("║                         SUMMARY                            ║")
+say("╠════════════════════════════════════════════════════════════╣")
+say("║                                                            ║")
+say("║  input.ord(char)                                          ║")
+say("║    Converts a character to its ASCII code (like Python)   ║")
+say("║    Example: input.ord(\"A\") -> 65                          ║")
+say("║                                                            ║")
+say("║  input.chr(code)                                          ║")
+say("║    Converts an ASCII code to a character (like Python)    ║")
+say("║    Example: input.chr(65) -> \"A\"                          ║")
+say("║                                                            ║")
+say("║  Benefits:                                                 ║")
+say("║    • Standard Python naming (ord/chr)                      ║")
+say("║    • No need to memorize ASCII codes                       ║")
+say("║    • More readable and professional code                   ║")
+say("║    • Perfect for keyboard input handling                   ║")
+say("║                                                            ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")

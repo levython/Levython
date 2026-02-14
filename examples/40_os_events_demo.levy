@@ -1,0 +1,312 @@
+# ============================================================================
+# OS.Events Module Demo
+# ============================================================================
+#
+# Demonstrates the Events module's query and polling API:
+# - Active listener management
+# - Event polling
+# - Event history retrieval
+# - Event dispatch
+#
+# Note: Functions requiring callback arguments (watch_file,
+#       watch_network, watch_power, set_callback)
+#       are not yet fully supported for Levython user-defined functions.
+#       File system monitoring is also not yet implemented on macOS.
+#       This demo focuses on the available query/polling API surface.
+#
+# Platform Support: Windows, macOS, Linux
+#
+# Run with: ./levython examples/32_os_events_demo.levy
+# ============================================================================
+
+import os
+
+say("================================================================")
+say("       OS.Events Module Demo")
+say("       Event Monitoring Query API")
+say("================================================================")
+say("")
+
+el <- os.Events
+
+# ============================================================================
+# Section 1: Active Listeners Query (Empty State)
+# ============================================================================
+
+say("--- Section 1: Active Listeners (Initial State) ---")
+say("")
+
+try {
+    active <- el.list()
+    say("Active listeners at startup: " + str(len(active)))
+
+    if len(active) == 0 {
+        say("No listeners registered (expected for fresh start)")
+    } else {
+        for listener in active {
+            say("  Listener: " + str(listener))
+        }
+    }
+} catch e {
+    say("Error querying active listeners: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 2: Event Polling (No Listeners)
+# ============================================================================
+
+say("--- Section 2: Event Polling (No Listeners) ---")
+say("")
+
+try {
+    say("Polling for events with no active listeners...")
+    events <- el.poll()
+    say("Events received: " + str(len(events)))
+
+    if len(events) == 0 {
+        say("No events (expected with no listeners)")
+    } else {
+        for event in events {
+            say("  Event: " + str(event))
+        }
+    }
+} catch e {
+    say("Error polling events: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 3: Event Polling with Timeout
+# ============================================================================
+
+say("--- Section 3: Event Polling with Timeout ---")
+say("")
+
+try {
+    say("Polling for events with 100ms timeout...")
+    events <- el.poll(100)
+    say("Events received: " + str(len(events)))
+
+    if len(events) == 0 {
+        say("No events within timeout (expected)")
+    } else {
+        for event in events {
+            say("  Event: " + str(event))
+        }
+    }
+} catch e {
+    say("Error polling with timeout: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 4: Event History
+# ============================================================================
+
+say("--- Section 4: Event History ---")
+say("")
+
+try {
+    say("Getting last 10 events...")
+    last_events <- el.get_recent(10)
+    say("Stored events: " + str(len(last_events)))
+
+    if len(last_events) == 0 {
+        say("No events in history (expected for fresh session)")
+    } else {
+        for event in last_events {
+            say("  " + str(event))
+        }
+    }
+} catch e {
+    say("Error getting last events: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 5: Event History (Default Count)
+# ============================================================================
+
+say("--- Section 5: Event History (Default Count) ---")
+say("")
+
+try {
+    say("Getting last events with default count...")
+    last_events <- el.get_recent()
+    say("Stored events (default): " + str(len(last_events)))
+
+    if len(last_events) == 0 {
+        say("No events in history")
+    } else {
+        for event in last_events {
+            say("  " + str(event))
+        }
+    }
+} catch e {
+    say("Error getting last events (default): " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 6: Dispatch Pending Events
+# ============================================================================
+
+say("--- Section 6: Dispatch Pending Events ---")
+say("")
+
+try {
+    say("Dispatching pending events...")
+    count <- el.dispatch()
+    say("Dispatched events: " + str(count))
+
+    if count == 0 {
+        say("No pending events to dispatch (expected)")
+    }
+} catch e {
+    say("Error dispatching events: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 7: Unregister Non-Existent Listener
+# ============================================================================
+
+say("--- Section 7: Unregister Non-Existent Listener ---")
+say("")
+
+try {
+    say("Attempting to unregister listener ID 9999...")
+    result <- el.unwatch(9999)
+    say("Unregister result: " + str(result))
+    say("(Expected false - listener does not exist)")
+} catch e {
+    say("Error unregistering: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 8: Remove Non-Existent Callback
+# ============================================================================
+
+say("--- Section 8: Remove Non-Existent Callback ---")
+say("")
+
+try {
+    say("Attempting to remove callback for FILE_CREATED...")
+    el.remove_callback("FILE_CREATED")
+    say("Remove callback completed (no error)")
+} catch e {
+    say("Error removing callback: " + e)
+}
+
+try {
+    say("Attempting to remove callback for NETWORK_CONNECTED...")
+    el.remove_callback("NETWORK_CONNECTED")
+    say("Remove callback completed (no error)")
+} catch e {
+    say("Error removing callback: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 9: Multiple Poll/Query Cycles
+# ============================================================================
+
+say("--- Section 9: Multiple Poll/Query Cycles ---")
+say("")
+
+try {
+    say("Running 3 poll/query cycles...")
+    say("")
+
+    i <- 0
+    while i < 3 {
+        say("  Cycle " + str(i + 1) + ":")
+
+        # Poll events
+        events <- el.poll(50)
+        say("    Events polled: " + str(len(events)))
+
+        # Check active listeners
+        active <- el.list()
+        say("    Active listeners: " + str(len(active)))
+
+        # Dispatch
+        dispatched <- el.dispatch()
+        say("    Dispatched: " + str(dispatched))
+
+        i <- i + 1
+    }
+
+    say("")
+    say("All cycles complete")
+} catch e {
+    say("Error in poll/query cycle: " + e)
+}
+
+say("")
+
+# ============================================================================
+# Section 10: Platform Information
+# ============================================================================
+
+say("--- Section 10: Platform & API Summary ---")
+say("")
+
+platform <- os.name()
+say("Platform: " + platform)
+say("")
+
+say("EventListener API Status:")
+say("  list()                   - Available (query registered listeners)")
+say("  poll(timeout?)           - Available (poll for pending events)")
+say("  get_recent(count?)       - Available (retrieve event history)")
+say("  dispatch_pending()       - Available (dispatch queued events)")
+say("  unregister_listener(id)  - Available (remove a listener)")
+say("  remove_callback(type)    - Available (remove event callback)")
+say("")
+
+if platform == "macos" {
+    say("  register_file_watcher    - Not yet implemented on macOS")
+    say("  register_network_listener - Callback type mismatch (known issue)")
+    say("  register_power_listener   - Callback type mismatch (known issue)")
+    say("  set_callback              - Callback type mismatch (known issue)")
+} else {
+    say("  register_file_watcher    - Available (Windows/Linux)")
+    say("  register_network_listener - Callback type pending fix")
+    say("  register_power_listener   - Callback type pending fix")
+    say("  set_callback              - Callback type pending fix")
+}
+
+say("")
+
+# ============================================================================
+# Summary
+# ============================================================================
+
+say("================================================================")
+say("                    Demo Complete")
+say("================================================================")
+say("")
+say("EventListener features demonstrated:")
+say("  1. Active listener query (empty state)")
+say("  2. Event polling (no listeners)")
+say("  3. Event polling with timeout")
+say("  4. Event history retrieval")
+say("  5. Event history (default count)")
+say("  6. Pending event dispatch")
+say("  7. Unregister non-existent listener")
+say("  8. Remove non-existent callback")
+say("  9. Multiple poll/query cycles")
+say(" 10. Platform and API summary")
+say("")
+say("================================================================")

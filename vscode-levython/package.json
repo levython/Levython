@@ -1,22 +1,28 @@
 {
     "name": "levython",
-    "displayName": "Levython",
-    "description": "Levython language support - syntax highlighting, snippets, and more",
-    "version": "1.0.2",
+    "displayName": "Levython - Complete Language Support",
+    "description": "Full language support for Levython - syntax highlighting, IntelliSense, 100+ snippets for OS automation, async/await, HTTP, crypto, and more",
+    "version": "1.0.3",
     "publisher": "levython",
     "engines": {
         "vscode": "^1.74.0"
     },
     "categories": [
         "Programming Languages",
-        "Snippets"
+        "Snippets",
+        "Formatters"
     ],
     "keywords": [
         "levython",
         "levy",
         "programming",
         "jit",
-        "fast"
+        "fast",
+        "systems-programming",
+        "os-automation",
+        "async",
+        "http",
+        "crypto"
     ],
     "repository": {
         "type": "git",
@@ -28,7 +34,11 @@
                 "id": "levython",
                 "aliases": ["Levython", "levython", "levy"],
                 "extensions": [".levy", ".ly"],
-                "configuration": "./language-configuration.json"
+                "configuration": "./language-configuration.json",
+                "icon": {
+                    "light": "./icons/levython-icon.png",
+                    "dark": "./icons/levython-icon.png"
+                }
             }
         ],
         "iconThemes": [
@@ -50,6 +60,23 @@
                 "language": "levython",
                 "path": "./snippets/levython.json"
             }
-        ]
+        ],
+        "configurationDefaults": {
+            "[levython]": {
+                "editor.tabSize": 4,
+                "editor.insertSpaces": false,
+                "editor.detectIndentation": true,
+                "editor.formatOnType": true,
+                "editor.autoIndent": "full",
+                "editor.semanticHighlighting.enabled": true,
+                "editor.wordBasedSuggestions": "matchingDocuments",
+                "editor.quickSuggestions": {
+                    "other": true,
+                    "comments": false,
+                    "strings": true
+                },
+                "editor.suggest.snippetsPreventQuickSuggestions": false
+            }
+        }
     }
 }

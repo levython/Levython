@@ -1,0 +1,316 @@
+# ============================================================================
+# LEVYTHON OS.HOOKS MODULE DEMONSTRATION
+# ============================================================================
+# This example demonstrates the OS.Hooks submodule for system-level hooking,
+# monitoring, and interception of OS events such as process creation,
+# file access, keyboard/mouse input, network connections, and more.
+#
+# ⚠️  WARNING: These are powerful system-level APIs that can affect system
+#    stability and security. Use with caution and appropriate privileges.
+#
+# Run with: ./levython examples/28_os_hooks_demo.levy
+# ============================================================================
+
+import os
+
+say("╔════════════════════════════════════════════════════════════════════╗")
+say("║           LEVYTHON OS.HOOKS MODULE DEMONSTRATION                   ║")
+say("╚════════════════════════════════════════════════════════════════════╝")
+say("")
+
+# -----------------------------------------------------------------------------
+# 1. Hook Registration & Management
+# -----------------------------------------------------------------------------
+say("📋 HOOK REGISTRATION & MANAGEMENT")
+say("   ─────────────────────────────────────────────────────────")
+
+# Register hooks for different event types
+proc_hook_id <- os.Hooks.register(os.Hooks.PROCESS_CREATE, "Monitor process creation")
+file_hook_id <- os.Hooks.register(os.Hooks.FILE_ACCESS, "Monitor file system access")
+net_hook_id <- os.Hooks.register(os.Hooks.NETWORK_CONNECT, "Monitor network connections")
+key_hook_id <- os.Hooks.register(os.Hooks.KEYBOARD, "Monitor keyboard input")
+
+say("   ✓ Registered process creation hook: ID " + str(proc_hook_id))
+say("   ✓ Registered file access hook: ID " + str(file_hook_id))
+say("   ✓ Registered network connection hook: ID " + str(net_hook_id))
+say("   ✓ Registered keyboard hook: ID " + str(key_hook_id))
+say("")
+
+# List all registered hooks
+hooks <- os.Hooks.list()
+say("   📊 Total hooks registered: " + str(len(hooks)))
+i <- 0
+while i < len(hooks) {
+    hook <- hooks[i]
+    enabled_text <- ""
+    if hook["enabled"] {
+        enabled_text <- "enabled"
+    } else {
+        enabled_text <- "disabled"
+    }
+    say("      Hook #" + str(hook["id"]) + ": " + hook["type"] + " [" + enabled_text + "]")
+    say("        Description: " + hook["description"])
+    i <- i + 1
+}
+say("")
+
+# -----------------------------------------------------------------------------
+# 2. Process Monitoring Hooks
+# -----------------------------------------------------------------------------
+say("🔍 PROCESS MONITORING HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+# NOTE: Callback registration with user-defined functions is not yet supported
+# This is a known issue - callbacks work only internally at this time
+say("   ℹ️  Callback registration skipped (known limitation)")
+say("   ℹ️  Demonstrating event functions instead...")
+say("")
+
+# Enable the hook (even without callback)
+enabled <- os.Hooks.enable(proc_hook_id)
+say("   ✓ Hook enabled: " + str(enabled))
+say("")
+
+# Simulate process creation event (in real usage, this would be triggered by OS)
+current_pid <- os.getpid()
+process_info <- os.Hooks.hook_process_create(current_pid)
+say("   Current process info:")
+say("      PID: " + str(process_info["pid"]))
+say("      Event: " + process_info["event"])
+proc_keys <- keys(process_info)
+if contains(proc_keys, "path") {
+    say("      Path: " + process_info["path"])
+}
+say("")
+
+# Process exit event
+exit_info <- os.Hooks.hook_process_exit(current_pid, 0)
+say("   Process exit event:")
+say("      PID: " + str(exit_info["pid"]))
+say("      Exit Code: " + str(exit_info["exit_code"]))
+say("      Event: " + exit_info["event"])
+say("")
+
+# -----------------------------------------------------------------------------
+# 3. File System Access Hooks
+# -----------------------------------------------------------------------------
+say("📁 FILE SYSTEM ACCESS HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+# NOTE: Skipping callback registration (known limitation)
+os.Hooks.enable(file_hook_id)
+say("   ✓ File access hook enabled (without callback)")
+say("")
+
+# Simulate file access events
+read_event <- os.Hooks.hook_file_access("/etc/passwd", "read")
+say("   File read event:")
+say("      Path: " + read_event["path"])
+say("      Mode: " + read_event["mode"])
+say("      Event: " + read_event["event"])
+say("")
+
+write_event <- os.Hooks.hook_file_access("/tmp/test.txt", "write")
+say("   File write event:")
+say("      Path: " + write_event["path"])
+say("      Mode: " + write_event["mode"])
+say("")
+
+# -----------------------------------------------------------------------------
+# 4. Network Connection Hooks
+# -----------------------------------------------------------------------------
+say("🌐 NETWORK CONNECTION HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+# NOTE: Skipping callback registration (known limitation)
+os.Hooks.enable(net_hook_id)
+say("   ✓ Network connection hook enabled (without callback)")
+say("")
+
+# Simulate network connection events
+tcp_conn <- os.Hooks.hook_network_connect("example.com", 443, "tcp")
+say("   TCP connection event:")
+say("      Host: " + tcp_conn["host"])
+say("      Port: " + str(tcp_conn["port"]))
+say("      Protocol: " + tcp_conn["protocol"])
+say("      Event: " + tcp_conn["event"])
+say("")
+
+udp_conn <- os.Hooks.hook_network_connect("8.8.8.8", 53, "udp")
+say("   UDP connection event:")
+say("      Host: " + udp_conn["host"])
+say("      Port: " + str(udp_conn["port"]))
+say("      Protocol: " + udp_conn["protocol"])
+say("")
+
+# -----------------------------------------------------------------------------
+# 5. Keyboard & Mouse Input Hooks
+# -----------------------------------------------------------------------------
+say("⌨️  KEYBOARD & MOUSE INPUT HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+# NOTE: Skipping callback registration (known limitation)
+os.Hooks.enable(key_hook_id)
+say("   ✓ Keyboard hook enabled (without callback)")
+say("")
+
+# Simulate keyboard events
+key_press <- os.Hooks.hook_keyboard(65, true)  # 'A' key pressed
+say("   Keyboard event (key press):")
+say("      Key Code: " + str(key_press["key_code"]))
+say("      Pressed: " + str(key_press["pressed"]))
+say("      Event: " + key_press["event"])
+say("")
+
+# Simulate mouse events
+mouse_hook_id <- os.Hooks.register(os.Hooks.MOUSE, "Monitor mouse input")
+os.Hooks.enable(mouse_hook_id)
+
+mouse_move <- os.Hooks.hook_mouse(100, 200, 0, true)
+say("   Mouse event (left click):")
+say("      Position: (" + str(mouse_move["x"]) + ", " + str(mouse_move["y"]) + ")")
+say("      Button: " + str(mouse_move["button"]))
+say("      Pressed: " + str(mouse_move["pressed"]))
+say("")
+
+# -----------------------------------------------------------------------------
+# 6. System Call Hooks
+# -----------------------------------------------------------------------------
+say("⚙️  SYSTEM CALL HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+syscall_hook_id <- os.Hooks.register(os.Hooks.SYSCALL, "Monitor system calls")
+os.Hooks.enable(syscall_hook_id)
+
+# Simulate syscall monitoring (syscall number varies by OS)
+syscall_event <- os.Hooks.hook_syscall(1, [1, "stdout", 5])  # write syscall example
+say("   System call event:")
+say("      Syscall Number: " + str(syscall_event["syscall_number"]))
+say("      Event: " + syscall_event["event"])
+syscall_keys <- keys(syscall_event)
+if contains(syscall_keys, "args") {
+    say("      Arguments: " + str(syscall_event["args"]))
+}
+say("")
+
+# -----------------------------------------------------------------------------
+# 7. Memory Access Hooks
+# -----------------------------------------------------------------------------
+say("💾 MEMORY ACCESS HOOKS")
+say("   ─────────────────────────────────────────────────────────")
+
+mem_hook_id <- os.Hooks.register(os.Hooks.MEMORY_ACCESS, "Monitor memory access")
+os.Hooks.enable(mem_hook_id)
+say("   ✓ Memory access hook enabled")
+say("")
+
+# Read memory from current process (demonstration)
+pid <- os.getpid()
+# Note: In real usage, you'd need proper permissions and valid addresses
+say("   Attempting to read memory from PID: " + str(pid))
+say("   (This is a demonstration - actual memory reading requires privileges)")
+say("")
+
+# -----------------------------------------------------------------------------
+# 8. Advanced: DLL/SO Injection (Windows/Linux)
+# -----------------------------------------------------------------------------
+say("💉 DLL/SO INJECTION (Advanced)")
+say("   ─────────────────────────────────────────────────────────")
+say("   ⚠️  Warning: Library injection requires elevated privileges!")
+say("   ⚠️  This is for demonstration purposes only.")
+say("")
+
+injection_hook_id <- os.Hooks.register(os.Hooks.DLL_INJECTION, "Library injection hook")
+say("   ✓ Injection hook registered: ID " + str(injection_hook_id))
+say("   Note: Actual injection would use os.Hooks.inject_library(pid, library_path)")
+say("")
+
+# -----------------------------------------------------------------------------
+# 9. Hook Management - Disable & Cleanup
+# -----------------------------------------------------------------------------
+say("🧹 HOOK CLEANUP & MANAGEMENT")
+say("   ─────────────────────────────────────────────────────────")
+
+# Disable all hooks
+os.Hooks.disable(proc_hook_id)
+os.Hooks.disable(file_hook_id)
+os.Hooks.disable(net_hook_id)
+os.Hooks.disable(key_hook_id)
+os.Hooks.disable(mouse_hook_id)
+os.Hooks.disable(syscall_hook_id)
+os.Hooks.disable(mem_hook_id)
+say("   ✓ All hooks disabled")
+say("")
+
+# List hooks after disabling
+hooks_after <- os.Hooks.list()
+say("   📊 Hooks after disabling:")
+j <- 0
+while j < len(hooks_after) {
+    hook <- hooks_after[j]
+    status <- ""
+    if hook["enabled"] {
+        status <- "enabled"
+    } else {
+        status <- "disabled"
+    }
+    say("      Hook #" + str(hook["id"]) + ": " + hook["type"] + " [" + status + "]")
+    j <- j + 1
+}
+say("")
+
+# Unregister hooks
+os.Hooks.unregister(proc_hook_id)
+os.Hooks.unregister(file_hook_id)
+os.Hooks.unregister(net_hook_id)
+os.Hooks.unregister(key_hook_id)
+os.Hooks.unregister(mouse_hook_id)
+os.Hooks.unregister(syscall_hook_id)
+os.Hooks.unregister(mem_hook_id)
+os.Hooks.unregister(injection_hook_id)
+say("   ✓ All hooks unregistered")
+say("")
+
+# Verify cleanup
+final_hooks <- os.Hooks.list()
+say("   📊 Remaining hooks: " + str(len(final_hooks)))
+say("")
+
+# -----------------------------------------------------------------------------
+# 10. Hook Type Constants Reference
+# -----------------------------------------------------------------------------
+say("📚 HOOK TYPE CONSTANTS REFERENCE")
+say("   ─────────────────────────────────────────────────────────")
+say("   Available hook types:")
+say("      • os.Hooks.PROCESS_CREATE  - Monitor process creation")
+say("      • os.Hooks.PROCESS_EXIT    - Monitor process termination")
+say("      • os.Hooks.FILE_ACCESS     - Monitor file system access")
+say("      • os.Hooks.NETWORK_CONNECT - Monitor network connections")
+say("      • os.Hooks.KEYBOARD        - Monitor keyboard events")
+say("      • os.Hooks.MOUSE           - Monitor mouse events")
+say("      • os.Hooks.SYSCALL         - Monitor system calls")
+say("      • os.Hooks.MEMORY_ACCESS   - Monitor memory read/write")
+say("      • os.Hooks.DLL_INJECTION   - Inject code into processes")
+say("")
+
+# -----------------------------------------------------------------------------
+# Security Notice
+# -----------------------------------------------------------------------------
+say("⚠️  SECURITY NOTICE")
+say("   ─────────────────────────────────────────────────────────")
+say("   OS.Hooks provides low-level system access that can:")
+say("      • Affect system stability")
+say("      • Require elevated privileges (root/admin)")
+say("      • Be blocked by antivirus/security software")
+say("      • Violate software licenses or terms of service")
+say("")
+say("   Always use responsibly and ethically:")
+say("      ✓ Only hook processes you own or have permission to monitor")
+say("      ✓ Be aware of legal implications")
+say("      ✓ Test in controlled environments")
+say("      ✓ Clean up hooks properly when done")
+say("")
+
+say("╔════════════════════════════════════════════════════════════════════╗")
+say("║           OS.HOOKS DEMONSTRATION COMPLETE                          ║")
+say("╚════════════════════════════════════════════════════════════════════╝")

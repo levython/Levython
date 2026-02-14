@@ -1,0 +1,368 @@
+# ============================================================================
+# OS.Audio Module Demo
+# ============================================================================
+#
+# This example demonstrates the OS.Audio module for managing audio
+# devices, controlling volume, playing sounds, and manipulating audio streams.
+#
+# Features demonstrated:
+# - Device enumeration and information
+# - Volume control and muting
+# - Audio playback (files and tones)
+# - Stream management
+# - Audio mixing and effects
+# - Recording capabilities
+#
+# Platform support: Windows, macOS, Linux
+#
+# Run with: ./levython examples/31_os_audio_demo.levy
+# ============================================================================
+
+import os
+
+say("=== OS.Audio Module Demo ===")
+say("")
+
+# ============================================================================
+# 1. Device Enumeration
+# ============================================================================
+say("1. Enumerating Audio Devices")
+say("----------------------------------------")
+
+devices <- os.Audio.list_devices("all")
+say("Found " + str(len(devices)) + " audio devices:")
+say("")
+
+for device in devices {
+    say("  Device: " + device["name"])
+    say("    ID: " + device["id"])
+    say("    Type: " + device["type"])
+    say("    Default: " + str(device["is_default"]))
+    say("    Channels: " + str(device["channels"]))
+    say("    Sample Rate: " + str(device["sample_rate"]) + " Hz")
+    say("    Format: " + device["format"])
+    say("    Buffer Size: " + str(device["buffer_size"]) + " frames")
+    say("    Latency: " + str(device["latency"]) + " ms")
+    say("")
+}
+
+# ============================================================================
+# 2. Default Device Information
+# ============================================================================
+say("")
+say("2. Default Device Information")
+say("----------------------------------------")
+
+try {
+    default_playback <- os.Audio.get_default_device("playback")
+    say("Default playback device: " + default_playback)
+
+    device_info <- os.Audio.get_device_info(default_playback)
+    say("Device details:")
+    say("  Name: " + device_info["name"])
+    say("  Channels: " + str(device_info["channels"]))
+    say("  Sample Rate: " + str(device_info["sample_rate"]) + " Hz")
+} catch error {
+    say("Error: " + str(error))
+}
+
+# ============================================================================
+# 3. Volume Control
+# ============================================================================
+say("")
+say("3. Volume Control")
+say("----------------------------------------")
+
+try {
+    # Get current volume
+    current_volume <- os.Audio.get_volume()
+    say("Current volume: " + str(current_volume * 100) + "%")
+
+    # Store original volume for restoration
+    original_volume <- current_volume
+
+    # Set volume to 50%
+    say("Setting volume to 50%...")
+    os.Audio.set_volume(0.5)
+
+    new_volume <- os.Audio.get_volume()
+    say("New volume: " + str(new_volume * 100) + "%")
+
+    # Check mute status
+    is_muted <- os.Audio.is_muted()
+    say("Muted: " + str(is_muted))
+
+    # Restore original volume
+    os.Audio.set_volume(original_volume)
+    say("Volume restored to: " + str(original_volume * 100) + "%")
+
+} catch error {
+    say("Volume control error: " + str(error))
+}
+
+# ============================================================================
+# 4. Mute Control
+# ============================================================================
+say("")
+say("4. Mute Control")
+say("----------------------------------------")
+
+try {
+    # Get current mute state
+    was_muted <- os.Audio.is_muted()
+    say("Current mute state: " + str(was_muted))
+
+    # Mute audio
+    say("Muting audio...")
+    os.Audio.set_mute(true)
+    say("Muted: " + str(os.Audio.is_muted()))
+
+    # Wait a moment
+    for i in range(100000) { }
+
+    # Unmute audio
+    say("Unmuting audio...")
+    os.Audio.set_mute(false)
+    say("Muted: " + str(os.Audio.is_muted()))
+
+} catch error {
+    say("Mute control error: " + str(error))
+}
+
+# ============================================================================
+# 5. Play Tone
+# ============================================================================
+say("")
+say("5. Tone Generation and Playback")
+say("----------------------------------------")
+
+try {
+    say("Playing 440 Hz tone (A4) for 0.5 seconds...")
+    os.Audio.play_tone(440.0, 0.5, 0.3)
+
+    say("Playing 523 Hz tone (C5) for 0.5 seconds...")
+    os.Audio.play_tone(523.25, 0.5, 0.3)
+
+    say("Playing 659 Hz tone (E5) for 0.5 seconds...")
+    os.Audio.play_tone(659.25, 0.5, 0.3)
+
+    say("Tones played successfully!")
+
+} catch error {
+    say("Tone playback error: " + str(error))
+}
+
+# ============================================================================
+# 6. Play Sound File
+# ============================================================================
+say("")
+say("6. Sound File Playback")
+say("----------------------------------------")
+
+try {
+    say("Sound file playback function available")
+    say("Usage: os.Audio.play_sound(file_path, volume, device_id)")
+
+} catch error {
+    say("Sound playback error: " + str(error))
+}
+
+# ============================================================================
+# 7. Stream Management
+# ============================================================================
+say("")
+say("7. Audio Stream Management")
+say("----------------------------------------")
+
+try {
+    # Create stream configuration
+    stream_config <- {
+        "channels": 2,
+        "sample_rate": 44100,
+        "buffer_size": 1024
+    }
+
+    say("Creating audio stream...")
+    stream_id <- os.Audio.create_stream(stream_config)
+    say("Stream created with ID: " + str(stream_id))
+
+    # Generate sine wave samples
+    say("Generating audio samples...")
+    samples <- []
+    frequency <- 440.0
+    sample_rate <- 44100.0
+    duration <- 0.1
+    num_samples <- int(sample_rate * duration)
+
+    for i in range(num_samples) {
+        t <- i / sample_rate
+        value <- int(16000.0)
+        append(samples, value)
+    }
+
+    say("Writing " + str(len(samples)) + " samples to stream...")
+    bytes_written <- os.Audio.write_stream(stream_id, samples)
+    say("Wrote " + str(bytes_written) + " bytes")
+
+    # Close the stream
+    say("Closing stream...")
+    os.Audio.close_stream(stream_id)
+    say("Stream closed successfully")
+
+} catch error {
+    say("Stream management error: " + str(error))
+}
+
+# ============================================================================
+# 8. Audio Mixing
+# ============================================================================
+say("")
+say("8. Audio Mixing")
+say("----------------------------------------")
+
+try {
+    # Create two simple audio signals
+    signal1 <- [100, 200, 300, 400, 500]
+    signal2 <- [50, 100, 150, 200, 250]
+    signal3 <- [25, 50, 75, 100, 125]
+
+    audio_list <- [signal1, signal2, signal3]
+    weights <- [0.5, 0.3, 0.2]
+
+    say("Mixing " + str(len(audio_list)) + " audio signals...")
+    mixed <- os.Audio.mix_streams(audio_list, weights)
+
+    say("Original signals:")
+    say("  Signal 1: " + str(signal1))
+    say("  Signal 2: " + str(signal2))
+    say("  Signal 3: " + str(signal3))
+    say("Mixed signal: " + str(mixed))
+
+} catch error {
+    say("Audio mixing error: " + str(error))
+}
+
+# ============================================================================
+# 9. Audio Effects
+# ============================================================================
+say("")
+say("9. Audio Effects")
+say("----------------------------------------")
+
+try {
+    # Original audio data
+    audio_data <- [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000]
+    say("Original audio: " + str(audio_data))
+
+    # Apply amplify effect
+    say("")
+    say("Applying amplify effect (2x gain)...")
+    amplified <- os.Audio.apply_effect(audio_data, "amplify", {"gain": 2.0})
+    say("Amplified: " + str(amplified))
+
+    # Apply fade in effect
+    say("")
+    say("Applying fade in effect...")
+    faded_in <- os.Audio.apply_effect(audio_data, "fade_in", {})
+    say("Faded in: " + str(faded_in))
+
+    # Apply fade out effect
+    say("")
+    say("Applying fade out effect...")
+    faded_out <- os.Audio.apply_effect(audio_data, "fade_out", {})
+    say("Faded out: " + str(faded_out))
+
+} catch error {
+    say("Audio effects error: " + str(error))
+}
+
+# ============================================================================
+# 10. Sample Rate Information
+# ============================================================================
+say("")
+say("10. Sample Rate Information")
+say("----------------------------------------")
+
+try {
+    sample_rate <- os.Audio.get_sample_rate()
+    say("Current sample rate: " + str(sample_rate) + " Hz")
+
+    common_rates <- [8000, 11025, 16000, 22050, 44100, 48000, 96000, 192000]
+    say("")
+    say("Common sample rates:")
+    for rate in common_rates {
+        say("  " + str(rate) + " Hz")
+    }
+
+} catch error {
+    say("Sample rate query error: " + str(error))
+}
+
+# ============================================================================
+# 11. Recording Information
+# ============================================================================
+say("")
+say("11. Recording Capabilities")
+say("----------------------------------------")
+
+say("Recording functions available:")
+say("  os.Audio.record_audio(duration, device_id)")
+say("  os.Audio.stop_recording(stream_id)")
+say("")
+say("Example usage:")
+say("  # Record 5 seconds of audio")
+say("  audio_data <- os.Audio.record(5.0)")
+say("  say('Recorded ' + str(len(audio_data)) + ' samples')")
+
+# ============================================================================
+# Summary
+# ============================================================================
+say("")
+say("======================================================================")
+say("OS.Audio Module Demo Complete!")
+say("======================================================================")
+
+say("")
+say("Available Functions:")
+say("  Device Management:")
+say("    - list_devices(type) - List all audio devices")
+say("    - get_default_device(type) - Get default device ID")
+say("    - set_default_device(device_id) - Set default device")
+say("    - get_device_info(device_id) - Get device information")
+say("")
+say("  Volume Control:")
+say("    - get_volume(device_id) - Get volume level (0.0-1.0)")
+say("    - set_volume(volume, device_id) - Set volume level")
+say("    - is_muted(device_id) - Get mute status")
+say("    - set_mute(muted, device_id) - Set mute status")
+say("")
+say("  Playback:")
+say("    - play_sound(file_path, volume, device_id) - Play audio file")
+say("    - play_tone(frequency, duration, volume) - Generate and play tone")
+say("    - stop(stream_id) - Stop playback")
+say("")
+say("  Streaming:")
+say("    - create_stream(config) - Create audio stream")
+say("    - write_stream(stream_id, audio_data) - Write to stream")
+say("    - close_stream(stream_id) - Close stream")
+say("")
+say("  Recording:")
+say("    - record(duration, device_id) - Record audio")
+say("    - stop_recording(stream_id) - Stop recording")
+say("")
+say("  Processing:")
+say("    - mix_streams(audio_list, weights) - Mix multiple audio signals")
+say("    - apply_effect(audio_data, effect_type, params) - Apply audio effects")
+say("")
+say("  Configuration:")
+say("    - get_sample_rate(device_id) - Get sample rate")
+say("    - set_sample_rate(rate, device_id) - Set sample rate")
+say("")
+
+say("Platform Support:")
+say("  Windows: WASAPI, waveOut/waveIn, Multimedia APIs")
+say("  macOS: CoreAudio, AudioUnit, AudioToolbox")
+say("  Linux: ALSA (Advanced Linux Sound Architecture)")
+say("")
+
+say("Demo completed successfully!")

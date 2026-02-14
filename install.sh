@@ -100,16 +100,45 @@ PACKAGES_DIR="$INSTALL_DIR/packages"
 # Global variables
 CXX=""
 OS=""
+ANIM_PID=""
 
 # Cleanup function for graceful exit
 cleanup() {
     local exit_code=$?
     rm -f /tmp/test_cpp17_$$ /tmp/march_test$$ compile_error.log 2>/dev/null
+    # Kill background animation if running
+    if [ -n "$ANIM_PID" ]; then
+        kill $ANIM_PID 2>/dev/null
+        wait $ANIM_PID 2>/dev/null
+    fi
     if [ $exit_code -ne 0 ]; then
         echo ""
         error "Installation failed. Check the error messages above."
     fi
     exit $exit_code
+}
+
+# Braille loading animation
+show_loading_animation() {
+    local message="$1"
+    local braille_chars=("⠋" "⠙" "⠹" "⠸" "⠼" "⠴" "⠦" "⠧" "⠇" "⠏")
+    local i=0
+    
+    while true; do
+        printf "\r${BLUE}${braille_chars[$i]}${NC} $message"
+        i=$(( (i + 1) % ${#braille_chars[@]} ))
+        sleep 0.1
+    done
+}
+
+# Stop loading animation
+stop_loading_animation() {
+    if [ -n "$ANIM_PID" ]; then
+        kill $ANIM_PID 2>/dev/null
+        wait $ANIM_PID 2>/dev/null
+        printf "\r\033[K"  # Clear the line
+    fi
+    ANIM_PID=""
 }
 
 # Set trap for cleanup
@@ -119,7 +148,7 @@ trap cleanup EXIT INT TERM
 print_banner() {
     echo ""
     echo -e "${CYAN}╔══════════════════════════════════════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║${NC}     ${GREEN}🚀 LEVYTHON INSTALLER${NC}                                          ${CYAN}║${NC}"
+    echo -e "${CYAN}║${NC}     ${GREEN}🚀 LEVYTHON INSTALLER v1.0.3${NC}                                   ${CYAN}║${NC}"
     echo -e "${CYAN}║${NC}     ${YELLOW}Be better than yesterday${NC}                             ${CYAN}║${NC}"
     echo -e "${CYAN}╚══════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
@@ -403,7 +432,7 @@ compile_levython() {
         "macos")
             # macOS optimizations
             COMPILE_FLAGS="$COMPILE_FLAGS -mmacosx-version-min=10.14"
-            LINK_LIBS="$LINK_LIBS -framework Security -framework CoreFoundation"
+            LINK_LIBS="$LINK_LIBS -framework Security -framework CoreFoundation -framework CoreGraphics -framework CoreAudio -framework AudioToolbox"
             ;;
     esac
 
@@ -417,27 +446,42 @@ compile_levython() {
     local output_file="$BIN_DIR/levython"
     
     # Strategy 1: Full optimization
-    step "Attempting optimized compilation..."
+    step "Compiling Levython with full optimizations..."
+    show_loading_animation "Compiling Levython (this may take a minute)..." &
+    ANIM_PID=$!
+    
     if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>/dev/null; then
+        stop_loading_animation
         compiled=true
         success "Compiled with full optimizations"
     else
+        stop_loading_animation
         warn "Optimized compilation failed, trying with reduced optimization..."
         
         # Strategy 2: Reduced optimization
         COMPILE_FLAGS="-std=c++17 -O2 -DNDEBUG"
+        show_loading_animation "Compiling with reduced optimization..." &
+        ANIM_PID=$!
+        
         if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>/dev/null; then
+            stop_loading_animation
             compiled=true
             success "Compiled with reduced optimization"
         else
+            stop_loading_animation
             warn "O2 compilation failed, trying basic compilation..."
             
             # Strategy 3: Basic compilation
             COMPILE_FLAGS="-std=c++17"
+            show_loading_animation "Compiling with basic flags..." &
+            ANIM_PID=$!
+            
             if $CXX $COMPILE_FLAGS -o "$output_file" $SRC_FILES $LINK_LIBS 2>compile_error.log; then
+                stop_loading_animation
                 compiled=true
                 warn "Compiled with basic flags (no optimization)"
             else
+                stop_loading_animation
                 # Strategy 4: Show detailed error and suggest fixes
                 error "Compilation failed. Error details:\n$(cat compile_error.log 2>/dev/null || echo 'No error log available')\n\nTroubleshooting:\n  1. Ensure C++17 support: $CXX -std=c++17 --version\n  2. Check disk space: df -h\n  3. Verify source integrity: wc -l $SRC_FILE\n  4. Try manual compilation: $CXX -std=c++17 -o levython $SRC_FILES $LINK_LIBS"
             fi
@@ -497,8 +541,8 @@ install_vscode_extension() {
     if [ -d "$SCRIPT_DIR/vscode-levython" ]; then
         if [ -n "$VSCODE_EXT_DIR" ]; then
             # Copy extension to VS Code extensions folder
-            mkdir -p "$VSCODE_EXT_DIR/levython.levython-1.0.0"
-            cp -r "$SCRIPT_DIR/vscode-levython/"* "$VSCODE_EXT_DIR/levython.levython-1.0.0/"
+            mkdir -p "$VSCODE_EXT_DIR/levython.levython-1.0.3"
+            cp -r "$SCRIPT_DIR/vscode-levython/"* "$VSCODE_EXT_DIR/levython.levython-1.0.3/"
             success "VS Code extension installed!"
             echo -e "    ${BLUE}ℹ${NC} Restart VS Code to activate syntax highlighting"
         else
@@ -506,10 +550,145 @@ install_vscode_extension() {
             mkdir -p "$INSTALL_DIR/vscode-extension"
             cp -r "$SCRIPT_DIR/vscode-levython/"* "$INSTALL_DIR/vscode-extension/"
             warn "VS Code not detected. Extension copied to ~/.levython/vscode-extension/"
-            echo -e "    ${BLUE}ℹ${NC} To install manually: cp -r ~/.levython/vscode-extension ~/.vscode/extensions/levython.levython-1.0.0"
+            echo -e "    ${BLUE}ℹ${NC} To install manually: cp -r ~/.levython/vscode-extension ~/.vscode/extensions/levython.levython-1.0.3"
         fi
     else
         warn "VS Code extension not found in package"
+    fi
+}
+
+# Install file type icons for .levy files in all icon themes
+install_file_icons() {
+    step "Installing file type icons..."
+    
+    local OS=$(detect_os)
+    
+    # Only install icons on Linux with desktop environment
+    if [ "$OS" != "linux" ]; then
+        warn "Icon installation is only supported on Linux desktop environments"
+        return
+    fi
+    
+    # Check if we have icon files
+    local ICON_DIR="$SCRIPT_DIR/icons"
+    if [ ! -d "$ICON_DIR" ]; then
+        # Create default icon if not exists
+        mkdir -p "$INSTALL_DIR/share/icons"
+        
+        # Create SVG icon (simple document icon with "LY")
+        cat > "$INSTALL_DIR/share/icons/text-x-levython.svg" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<svg width="64" height="64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="8" fill="#4A90E2"/>
+  <text x="32" y="44" font-family="Arial" font-size="24" font-weight="bold" fill="white" text-anchor="middle">LY</text>
+</svg>
+EOF
+        ICON_DIR="$INSTALL_DIR/share/icons"
+    fi
+    
+    # Find all icon theme directories
+    local ICON_THEME_DIRS=(
+        "$HOME/.local/share/icons"
+        "$HOME/.icons"
+        "/usr/share/icons"
+        "/usr/local/share/icons"
+    )
+    
+    local installed_count=0
+    
+    for theme_base in "${ICON_THEME_DIRS[@]}"; do
+        if [ -d "$theme_base" ]; then
+            # Find all theme directories
+            for theme_dir in "$theme_base"/*; do
+                if [ -d "$theme_dir" ]; then
+                    # Inject icon into each theme's mimetypes directory
+                    for size_dir in "$theme_dir"/{scalable,48x48,32x32,24x24,22x22,16x16}; do
+                        local mimetype_dir="$size_dir/mimetypes"
+                        
+                        # Create directory if writable
+                        if [ -w "$(dirname "$size_dir")" ] || [ -w "$size_dir" ]; then
+                            mkdir -p "$mimetype_dir" 2>/dev/null
+                            
+                            if [ -w "$mimetype_dir" ]; then
+                                # Copy icon
+                                cp "$ICON_DIR/text-x-levython.svg" "$mimetype_dir/" 2>/dev/null && \
+                                    installed_count=$((installed_count + 1))
+                                
+                                # Also create PNG versions for non-scalable
+                                if [ -f "$ICON_DIR/text-x-levython.png" ]; then
+                                    cp "$ICON_DIR/text-x-levython.png" "$mimetype_dir/" 2>/dev/null
+                                fi
+                            fi
+                        fi
+                    done
+                fi
+            done
+        fi
+    done
+    
+    # Update icon caches
+    if command -v gtk-update-icon-cache &> /dev/null; then
+        for theme_base in "${ICON_THEME_DIRS[@]}"; do
+            if [ -d "$theme_base" ]; then
+                for theme_dir in "$theme_base"/*; do
+                    if [ -w "$theme_dir" ]; then
+                        gtk-update-icon-cache -f -t "$theme_dir" 2>/dev/null
+                    fi
+                done
+            fi
+        done
+    fi
+    
+    # Install MIME type definition
+    local MIME_DIR="$HOME/.local/share/mime/packages"
+    mkdir -p "$MIME_DIR"
+    
+    cat > "$MIME_DIR/levython.xml" << 'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+  <mime-type type="text/x-levython">
+    <comment>Levython source code</comment>
+    <glob pattern="*.levy"/>
+    <glob pattern="*.ly"/>
+    <icon name="text-x-levython"/>
+  </mime-type>
+</mime-info>
+EOF
+    
+    # Update MIME database
+    if command -v update-mime-database &> /dev/null; then
+        update-mime-database "$HOME/.local/share/mime" 2>/dev/null
+    fi
+    
+    # Install desktop file association
+    local DESKTOP_DIR="$HOME/.local/share/applications"
+    mkdir -p "$DESKTOP_DIR"
+    
+    cat > "$DESKTOP_DIR/levython.desktop" << EOF
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=Levython
+Comment=Run Levython scripts
+Exec=$BIN_DIR/levython %F
+Icon=text-x-levython
+Terminal=true
+Categories=Development;Programming;
+MimeType=text/x-levython;
+StartupNotify=false
+EOF
+    
+    # Update desktop database
+    if command -v update-desktop-database &> /dev/null; then
+        update-desktop-database "$DESKTOP_DIR" 2>/dev/null
+    fi
+    
+    if [ $installed_count -gt 0 ]; then
+        success "Injected Levython icons into $installed_count icon theme locations"
+        success "Registered .levy and .ly file types"
+    else
+        warn "Could not inject icons (insufficient permissions or no themes found)"
+        echo -e "    ${BLUE}ℹ${NC} Icons saved to: $INSTALL_DIR/share/icons/"
     fi
 }
 
@@ -755,6 +934,9 @@ main() {
     else
         step "Skipping VS Code extension installation (--no-vscode specified)"
     fi
+    
+    # Install file type icons (Linux only)
+    install_file_icons || warn "Icon installation failed (this is optional)"
     
     # Step 4: PATH setup
     if [ "$NO_PATH" = false ]; then

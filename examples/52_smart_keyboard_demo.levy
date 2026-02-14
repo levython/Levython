@@ -1,0 +1,164 @@
+# ============================================================================
+# Smart Type Handling Demo - os.InputControl
+# ============================================================================
+# Demonstrates the NEW feature: os.InputControl functions now accept
+# BOTH string characters AND integer codes automatically!
+#
+# No more need for input.ord() all the time!
+#
+# Run with: ./levython examples/41_smart_keyboard_demo.levy
+# ============================================================================
+
+import os
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║     NEW: Smart Type Handling in os.InputControl           ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+
+say("✨ NOW YOU CAN USE BOTH:")
+say("   • String characters: 'A', 'b', '1', etc.")
+say("   • Integer codes: 65, 98, 49, etc.")
+say("")
+say("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+say("")
+
+# =============================================================================
+# 1. press_key(), release_key(), tap_key() - NOW ACCEPT BOTH!
+# =============================================================================
+say("1. press_key(), release_key(), tap_key() - String OR Integer")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+say("   Old way (still works):")
+say("      os.InputControl.press_key(65)  # Code 65")
+say("")
+
+say("   NEW way (much cleaner!):")
+say("      os.InputControl.press_key('A')  # Character 'A'")
+say("")
+
+# Simulate pressing 'A' key using character
+say("   ✓ Simulating 'A' key with character:")
+os.InputControl.tap_key("A")
+say("      os.InputControl.tap_key('A')")
+say("")
+
+# Simulate pressing 'B' key using code (still works)
+say("   ✓ Simulating 'B' key with code:")
+os.InputControl.tap_key(66)
+say("      os.InputControl.tap_key(66)")
+say("")
+
+# =============================================================================
+# 2. block_key() - NOW ACCEPTS BOTH!
+# =============================================================================
+say("2. block_key() - String OR Integer")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+say("   Block using character:")
+say("      os.InputControl.block_key('Q')  # Block Q key")
+os.InputControl.block_key("Q")
+say("      ✓ 'Q' key blocked")
+say("")
+
+say("   Block using code:")
+say("      os.InputControl.block_key(27)  # Block ESC")
+os.InputControl.block_key(27)
+say("      ✓ ESC key (27) blocked")
+say("")
+
+# =============================================================================
+# 3. keyboard_remap() - NOW ACCEPTS BOTH!
+# =============================================================================
+say("3. keyboard_remap() - String OR Integer")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+say("   Remap using characters:")
+say("      os.InputControl.remap_key('A', 'B')  # A → B")
+os.InputControl.remap_key("A", "B")
+say("      ✓ 'A' remapped to 'B'")
+say("")
+
+say("   Remap using codes:")
+say("      os.InputControl.remap_key(20, 17)  # Caps → Ctrl")
+os.InputControl.remap_key(20, 17)
+say("      ✓ Caps Lock remapped to Ctrl")
+say("")
+
+say("   Mix and match:")
+say("      os.InputControl.remap_key('X', 89)  # X → Y")
+os.InputControl.remap_key("X", 89)
+say("      ✓ 'X' remapped to Y (code 89)")
+say("")
+
+# =============================================================================
+# 4. Practical Example: Type a Word
+# =============================================================================
+say("4. Practical Example - Type 'HELLO'")
+say("   ─────────────────────────────────────────────────────────")
+say("")
+
+say("   Before (needed input.ord()):")
+say("      letters <- ['H', 'E', 'L', 'L', 'O']")
+say("      for each letter:")
+say("          code <- input.ord(letter)  # Extra step!")
+say("          os.InputControl.press_key(code)")
+say("")
+
+say("   NOW (direct and clean):")
+say("      letters <- ['H', 'E', 'L', 'L', 'O']")
+say("      for each letter:")
+say("          os.InputControl.tap_key(letter)  # Done!")
+say("")
+
+say("   Simulating 'HELLO':")
+letters <- ["H", "E", "L", "L", "O"]
+i <- 0
+while i < len(letters) {
+    letter <- letters[i]
+    say("      → Pressing '" + letter + "'")
+    os.InputControl.tap_key(letter)
+    os.sleep_ms(50)
+    i <- i + 1
+}
+say("   ✓ Typed 'HELLO' without input.ord()!")
+say("")
+
+# =============================================================================
+# Cleanup
+# =============================================================================
+say("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
+say("")
+
+# Remove blocks and remaps
+os.InputControl.unblock_key("Q")
+os.InputControl.unblock_key(27)
+os.InputControl.remap_key("A", 0)
+os.InputControl.remap_key(20, 0)
+os.InputControl.remap_key("X", 0)
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║                       SUMMARY                              ║")
+say("╠════════════════════════════════════════════════════════════╣")
+say("║                                                            ║")
+say("║  ✅ os.InputControl.press_key(key)                         ║")
+say("║  ✅ os.InputControl.release_key(key)                       ║")
+say("║  ✅ os.InputControl.tap_key(key)                           ║")
+say("║     • key can be 'A' OR 65                                 ║")
+say("║                                                            ║")
+say("║  ✅ os.InputControl.block_key(key)                         ║")
+say("║     • key can be 'Q' OR 81                                 ║")
+say("║                                                            ║")
+say("║  ✅ os.InputControl.remap_key(from, to)                    ║")
+say("║     • Both from and to can be characters OR codes           ║")
+say("║                                                            ║")
+say("║  Benefits:                                                 ║")
+say("║    • Less verbose - no input.ord() needed                  ║")
+say("║    • More readable - 'A' is clearer than 65                ║")
+say("║    • Backwards compatible - codes still work               ║")
+say("║    • Flexible - mix characters and codes as needed         ║")
+say("║                                                            ║")
+say("╚════════════════════════════════════════════════════════════╝")

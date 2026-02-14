@@ -7,6 +7,9 @@
         { "include": "#strings" },
         { "include": "#numbers" },
         { "include": "#keywords" },
+        { "include": "#constants" },
+        { "include": "#modules" },
+        { "include": "#os-submodules" },
         { "include": "#functions" },
         { "include": "#builtins" },
         { "include": "#operators" },
@@ -30,7 +33,7 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.levython",
-                            "match": "\\\\."
+                            "match": "\\\\(n|t|r|\\\\|\"|'|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
                         }
                     ]
                 },
@@ -41,7 +44,7 @@
                     "patterns": [
                         {
                             "name": "constant.character.escape.levython",
-                            "match": "\\\\."
+                            "match": "\\\\(n|t|r|\\\\|\"|'|x[0-9a-fA-F]{2}|u[0-9a-fA-F]{4}|U[0-9a-fA-F]{8})"
                         }
                     ]
                 }
@@ -50,12 +53,20 @@
         "numbers": {
             "patterns": [
                 {
-                    "name": "constant.numeric.float.levython",
-                    "match": "\\b[0-9]+\\.[0-9]+\\b"
+                    "name": "constant.numeric.binary.levython",
+                    "match": "\\b0b[01]+\\b"
+                },
+                {
+                    "name": "constant.numeric.octal.levython",
+                    "match": "\\b0o[0-7]+\\b"
                 },
                 {
                     "name": "constant.numeric.hex.levython",
                     "match": "\\b0x[0-9a-fA-F]+\\b"
+                },
+                {
+                    "name": "constant.numeric.float.levython",
+                    "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
                 },
                 {
                     "name": "constant.numeric.integer.levython",
@@ -66,34 +77,86 @@
         "keywords": {
             "patterns": [
                 {
-                    "name": "keyword.control.levython",
-                    "match": "\\b(if|else|for|while|in|return|break|continue|import)\\b"
+                    "name": "keyword.control.flow.levython",
+                    "match": "\\b(if|else|for|while|in|break|continue|repeat)\\b"
                 },
                 {
-                    "name": "keyword.other.levython",
-                    "match": "\\b(act|class|new|self|this)\\b"
+                    "name": "keyword.control.exception.levython",
+                    "match": "\\b(try|catch|throw)\\b"
                 },
                 {
-                    "name": "constant.language.levython",
-                    "match": "\\b(true|false|none|null)\\b"
+                    "name": "keyword.control.import.levython",
+                    "match": "\\b(import)\\b"
                 },
                 {
-                    "name": "keyword.operator.arrow.levython",
+                    "name": "keyword.other.function.levython",
+                    "match": "\\b(act)\\b"
+                },
+                {
+                    "name": "keyword.other.class.levython",
+                    "match": "\\b(class|abstract|is_a|init)\\b"
+                },
+                {
+                    "name": "variable.language.levython",
+                    "match": "\\b(self|this)\\b"
+                },
+                {
+                    "name": "keyword.other.new.levython",
+                    "match": "\\b(new)\\b"
+                },
+                {
+                    "name": "keyword.operator.ternary.levython",
+                    "match": "\\?"
+                },
+                {
+                    "name": "keyword.operator.arrow.return.levython",
                     "match": "->"
                 },
                 {
                     "name": "keyword.operator.assignment.levython",
                     "match": "<-"
+                },
+                {
+                    "name": "keyword.operator.compound.assignment.levython",
+                    "match": "(\\+=|-=|\\*=|/=)"
+                }
+            ]
+        },
+        "constants": {
+            "patterns": [
+                {
+                    "name": "constant.language.boolean.levython",
+                    "match": "\\b(true|false|yes|no)\\b"
+                },
+                {
+                    "name": "constant.language.null.levython",
+                    "match": "\\b(none|null)\\b"
+                }
+            ]
+        },
+        "modules": {
+            "patterns": [
+                {
+                    "name": "support.class.module.levython",
+                    "match": "\\b(os|http|fs|path|process|json|url|net|thread|channel|async|crypto|datetime|log|config|input|http_server)\\b(?=\\.)"
+                }
+            ]
+        },
+        "os-submodules": {
+            "patterns": [
+                {
+                    "name": "support.class.os-submodule.levython",
+                    "match": "\\b(OS|os)\\.(Hooks|InputControl|Processes|Audio|Display|Privileges|Events|Persistence)\\b"
                 }
             ]
         },
         "functions": {
             "patterns": [
                 {
-                    "name": "entity.name.function.levython",
-                    "match": "\\b(act)\\s+([a-zA-Z_][a-zA-Z0-9_]*)",
+                    "name": "entity.name.function.definition.levython",
+                    "match": "\\b(act)\\s+([a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(",
                     "captures": {
-                        "1": { "name": "keyword.other.levython" },
+                        "1": { "name": "keyword.other.function.levython" },
                         "2": { "name": "entity.name.function.levython" }
                     }
                 },
@@ -109,20 +172,44 @@
         "builtins": {
             "patterns": [
                 {
-                    "name": "support.function.builtin.levython",
-                    "match": "\\b(say|print|str|len|append|range|input|int|float|type|read_file|write_file|file_exists|pow|sqrt|abs|min|max|floor|ceil|round|sin|cos|tan|log|exp)\\b"
+                    "name": "support.function.io.levython",
+                    "match": "\\b(say|ask|print|println|input|read_file|write_file|append_file|file_exists)\\b"
+                },
+                {
+                    "name": "support.function.conversion.levython",
+                    "match": "\\b(str|int|float|bool|type|ord|chr)\\b"
+                },
+                {
+                    "name": "support.function.collection.levython",
+                    "match": "\\b(len|append|insert|remove|pop|keys|values|items|has|get|set|clear|copy|slice|join|split|trim|upper|lower|replace|contains|starts_with|ends_with|find|count|reverse|sort|map|filter|reduce|zip|enumerate)\\b"
+                },
+                {
+                    "name": "support.function.math.levython",
+                    "match": "\\b(abs|min|max|pow|sqrt|floor|ceil|round|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|log|log10|log2|exp|pi|e)\\b"
+                },
+                {
+                    "name": "support.function.range.levython",
+                    "match": "\\b(range)\\b"
                 },
                 {
                     "name": "support.function.memory.levython",
-                    "match": "\\b(mem_alloc|mem_free|mem_read8|mem_read16|mem_read32|mem_read64|mem_write8|mem_write16|mem_write32|mem_write64)\\b"
+                    "match": "\\b(mem_alloc|mem_free|mem_copy|mem_set|mem_read8|mem_read16|mem_read32|mem_read64|mem_write8|mem_write16|mem_write32|mem_write64|mem_compare|mem_find)\\b"
                 },
                 {
                     "name": "support.function.bitwise.levython",
-                    "match": "\\b(bit_and|bit_or|bit_xor|bit_not|shift_left|shift_right)\\b"
+                    "match": "\\b(bit_and|bit_or|bit_xor|bit_not|shift_left|shift_right|rotate_left|rotate_right|popcount|clz|ctz)\\b"
                 },
                 {
                     "name": "support.function.tensor.levython",
-                    "match": "\\b(tensor|tensor_add|tensor_mul|tensor_matmul|tensor_dot|tensor_sum|tensor_mean|simd_add_f32|simd_mul_f32)\\b"
+                    "match": "\\b(tensor|tensor_shape|tensor_reshape|tensor_add|tensor_sub|tensor_mul|tensor_div|tensor_matmul|tensor_dot|tensor_sum|tensor_mean|tensor_max|tensor_min|tensor_transpose|tensor_slice|simd_add_f32|simd_mul_f32|simd_fma_f32|simd_sqrt_f32)\\b"
+                },
+                {
+                    "name": "support.function.random.levython",
+                    "match": "\\b(random|random_int|random_float|random_choice|random_shuffle|random_seed)\\b"
+                },
+                {
+                    "name": "support.function.system.levython",
+                    "match": "\\b(exit|assert|panic|time|time_ms|time_ns|clock|sleep|gc_collect|gc_stats)\\b"
                 }
             ]
         },
@@ -139,6 +226,22 @@
                 {
                     "name": "keyword.operator.logical.levython",
                     "match": "\\b(and|or|not)\\b"
+                },
+                {
+                    "name": "keyword.operator.member.levython",
+                    "match": "\\."
+                },
+                {
+                    "name": "punctuation.separator.colon.levython",
+                    "match": ":"
+                },
+                {
+                    "name": "punctuation.separator.comma.levython",
+                    "match": ","
+                },
+                {
+                    "name": "punctuation.terminator.semicolon.levython",
+                    "match": ";"
                 }
             ]
         },

@@ -1,0 +1,419 @@
+# ============================================================================
+# LEVYTHON - OS.Processes Module Demonstration
+# ============================================================================
+#
+# This example demonstrates the OS.Processes submodule which provides
+# comprehensive process management capabilities including:
+#
+# - Process enumeration and information retrieval
+# - Process creation, termination, suspension, and resumption
+# - Thread enumeration and management
+# - Memory read/write operations
+# - Library injection
+# - Process priority management
+#
+# Run with: ./levython examples/30_os_processes_demo.levy
+# ============================================================================
+
+import os
+
+say("================================================================================")
+say("OS.Processes Module - Process Management Demo")
+say("================================================================================")
+say("")
+
+# ============================================================================
+# SECTION 1: Process Enumeration
+# ============================================================================
+say("=== Section 1: Process Enumeration ===")
+say("")
+
+act list_all_processes() {
+    say("Listing all running processes...")
+
+    processes <- os.Processes.list()
+
+    say("Total processes: " + str(len(processes)))
+    say("")
+    say("First 10 processes:")
+    say("--------------------------------------------------------------------------------")
+    say("PID        PPID       Name")
+    say("--------------------------------------------------------------------------------")
+
+    count <- 0
+    for proc in processes {
+        if count >= 10 { break }
+
+        pid <- proc["pid"]
+        ppid <- proc["ppid"]
+        name <- proc["name"]
+
+        say(str(pid) + "          " + str(ppid) + "          " + name)
+        count <- count + 1
+    }
+    say("--------------------------------------------------------------------------------")
+    say("")
+}
+
+# Execute process enumeration
+list_all_processes()
+
+# ============================================================================
+# SECTION 2: Process Information Retrieval
+# ============================================================================
+say("=== Section 2: Process Information ===")
+say("")
+
+act get_current_process_info() {
+    my_pid <- os.getpid()
+    say("Current process PID: " + str(my_pid))
+    say("")
+
+    try {
+        proc_info <- os.Processes.get_info(my_pid)
+
+        say("Process Details:")
+        say("--------------------------------------------------------------------------------")
+        proc_keys <- keys(proc_info)
+        for key in proc_keys {
+            say("  " + key + ": " + str(proc_info[key]))
+        }
+        say("--------------------------------------------------------------------------------")
+        say("")
+    } catch e {
+        say("Error retrieving process info: " + e)
+        say("")
+    }
+}
+
+# Execute process info retrieval
+get_current_process_info()
+
+# ============================================================================
+# SECTION 3: Process Creation and Management
+# ============================================================================
+say("=== Section 3: Process Creation ===")
+say("")
+
+act test_process_creation() {
+    say("Creating a child process...")
+
+    try {
+        # Create a simple process (platform-dependent)
+        cmd <- "sleep"
+        args <- ["2"]
+        if os.name() == "Windows" {
+            cmd <- "cmd.exe"
+            args <- ["/c", "echo", "Hello from child!"]
+        }
+
+        child_pid <- os.Processes.create(cmd, args, {})
+        say("Child process created with PID: " + str(child_pid))
+        say("")
+
+        # Give the process time to start
+        os.sleep_ms(100)
+
+        # Get information about the child process
+        say("Child process information:")
+        try {
+            child_info <- os.Processes.get_info(child_pid)
+            say("  Name: " + child_info["name"])
+            say("  PID: " + str(child_info["pid"]))
+            say("")
+        } catch e {
+            say("  Could not retrieve child info (process may have ended)")
+            say("")
+        }
+
+        # Wait for the process to complete (with timeout)
+        say("Waiting for child process to complete (max 5 seconds)...")
+        exit_code <- os.Processes.wait(child_pid, 5000)
+
+        if exit_code != none {
+            say("Child process exited with code: " + str(exit_code))
+        } else {
+            say("Child process still running, terminating...")
+            os.Processes.terminate(child_pid, false)
+        }
+        say("")
+
+    } catch e {
+        say("Error in process creation: " + e)
+        say("")
+    }
+}
+
+# Execute process creation test
+test_process_creation()
+
+# ============================================================================
+# SECTION 4: Thread Management
+# ============================================================================
+say("=== Section 4: Thread Management ===")
+say("")
+
+act list_current_threads() {
+    my_pid <- os.getpid()
+    say("Listing threads for current process (PID: " + str(my_pid) + ")...")
+    say("")
+
+    try {
+        threads <- os.Processes.list_threads(my_pid)
+
+        say("Total threads: " + str(len(threads)))
+        say("--------------------------------------------------------------------------------")
+
+        for thread in threads {
+            say("  Thread: " + str(thread))
+        }
+        say("--------------------------------------------------------------------------------")
+        say("")
+
+    } catch e {
+        say("Error listing threads: " + e)
+        say("")
+    }
+}
+
+# Execute thread listing
+list_current_threads()
+
+# ============================================================================
+# SECTION 5: Process Priority Management
+# ============================================================================
+say("=== Section 5: Process Priority Management ===")
+say("")
+
+act test_priority_management() {
+    my_pid <- os.getpid()
+    say("Managing priority for current process (PID: " + str(my_pid) + ")...")
+    say("")
+
+    try {
+        # Get current priority
+        current_priority <- os.Processes.get_priority(my_pid)
+        say("Current priority: " + str(current_priority))
+        say("")
+
+        # Display available priority constants
+        say("Available priority levels:")
+        if os.name() == "Windows" {
+            say("  IDLE_PRIORITY:         " + str(os.Processes.IDLE_PRIORITY))
+            say("  BELOW_NORMAL_PRIORITY: " + str(os.Processes.BELOW_NORMAL_PRIORITY))
+            say("  NORMAL_PRIORITY:       " + str(os.Processes.NORMAL_PRIORITY))
+            say("  ABOVE_NORMAL_PRIORITY: " + str(os.Processes.ABOVE_NORMAL_PRIORITY))
+            say("  HIGH_PRIORITY:         " + str(os.Processes.HIGH_PRIORITY))
+        } else {
+            say("  PRIORITY_HIGHEST: " + str(os.Processes.PRIORITY_HIGHEST) + " (nice -20)")
+            say("  PRIORITY_HIGH:    " + str(os.Processes.PRIORITY_HIGH) + " (nice -10)")
+            say("  PRIORITY_NORMAL:  " + str(os.Processes.PRIORITY_NORMAL) + " (nice 0)")
+            say("  PRIORITY_LOW:     " + str(os.Processes.PRIORITY_LOW) + " (nice 10)")
+            say("  PRIORITY_LOWEST:  " + str(os.Processes.PRIORITY_LOWEST) + " (nice 19)")
+        }
+        say("")
+
+        say("Note: Changing process priority typically requires administrative privileges")
+        say("")
+
+    } catch e {
+        say("Error managing priority: " + e)
+        say("")
+    }
+}
+
+# Execute priority management test
+test_priority_management()
+
+# ============================================================================
+# SECTION 6: Process Suspension and Resumption
+# ============================================================================
+say("=== Section 6: Process Suspension (Advanced) ===")
+say("")
+
+act test_suspend_resume() {
+    say("Creating a test process for suspend/resume...")
+
+    try {
+        # Create a long-running process
+        cmd <- "sleep"
+        args <- ["30"]
+        if os.name() == "Windows" {
+            cmd <- "cmd.exe"
+            args <- ["/c", "timeout", "/t", "30"]
+        }
+
+        child_pid <- os.Processes.create(cmd, args, {})
+        say("Child process created with PID: " + str(child_pid))
+
+        # Give it time to start
+        os.sleep_ms(500)
+
+        # Suspend the process
+        say("Suspending process...")
+        result <- os.Processes.suspend(child_pid)
+        if result {
+            say("  Process suspended successfully")
+            os.sleep_ms(1000)
+
+            # Resume the process
+            say("Resuming process...")
+            result <- os.Processes.resume(child_pid)
+            if result {
+                say("  Process resumed successfully")
+            }
+        }
+
+        # Clean up - terminate the process
+        os.sleep_ms(500)
+        say("Cleaning up test process...")
+        os.Processes.terminate(child_pid, true)
+        say("")
+
+    } catch e {
+        say("Error in suspend/resume test: " + e)
+        say("(This may require elevated privileges)")
+        say("")
+    }
+}
+
+# Execute suspend/resume test
+test_suspend_resume()
+
+# ============================================================================
+# SECTION 7: Advanced Memory Operations
+# ============================================================================
+say("=== Section 7: Memory Operations (Advanced) ===")
+say("")
+
+say("Memory read/write operations require elevated privileges.")
+say("These operations are primarily used for:")
+say("  - Debugging")
+say("  - Process monitoring")
+say("  - Security analysis")
+say("  - Game modding/cheating (ethical considerations apply!)")
+say("")
+say("Example function signatures:")
+say("  data <- os.Processes.read_memory(pid, address, size)")
+say("  success <- os.Processes.write_memory(pid, address, data)")
+say("")
+
+# ============================================================================
+# SECTION 8: DLL/Library Injection
+# ============================================================================
+say("=== Section 8: DLL Injection (Advanced) ===")
+say("")
+
+say("DLL injection allows loading code into another process.")
+say("Common use cases:")
+say("  - Plugin systems")
+say("  - Debugging tools")
+say("  - API hooking")
+say("  - Instrumentation")
+say("")
+say("Example:")
+say("  success <- os.Processes.inject_library(pid, 'path/to/library.dll')")
+say("")
+say("Warning: Requires administrative/root privileges and can be dangerous!")
+say("")
+
+# ============================================================================
+# SECTION 9: Helper Functions
+# ============================================================================
+say("=== Section 9: Helper Functions ===")
+say("")
+
+act find_process_by_name(process_name) {
+    # Find a process by its name
+    # Returns: List of matching process PIDs
+    processes <- os.Processes.list()
+    matches <- []
+
+    for proc in processes {
+        name <- proc["name"]
+        if name == process_name {
+            append(matches, proc["pid"])
+        }
+    }
+
+    -> matches
+}
+
+act get_process_tree(pid) {
+    # Get the process tree (parent and children) for a given PID
+    processes <- os.Processes.list()
+
+    result <- {
+        "pid": pid,
+        "parent": none,
+        "children": []
+    }
+
+    # Find parent and children
+    for proc in processes {
+        proc_pid <- proc["pid"]
+        ppid <- proc["ppid"]
+
+        if proc_pid == pid {
+            result["parent"] <- ppid
+        }
+        if ppid == pid {
+            append(result["children"], proc_pid)
+        }
+    }
+
+    -> result
+}
+
+say("Helper function examples:")
+say("")
+
+# Example: Find processes by name
+say("Finding processes with 'python' in the name...")
+python_procs <- find_process_by_name("python")
+if len(python_procs) > 0 {
+    say("  Found " + str(len(python_procs)) + " Python processes")
+} else {
+    say("  No Python processes found")
+}
+say("")
+
+# Example: Get process tree for current process
+my_pid <- os.getpid()
+say("Process tree for current process (PID " + str(my_pid) + "):")
+tree <- get_process_tree(my_pid)
+say("  Parent PID: " + str(tree["parent"]))
+say("  Children: " + str(tree["children"]))
+say("")
+
+# ============================================================================
+# SECTION 10: Summary and Best Practices
+# ============================================================================
+say("================================================================================")
+say("Summary and Best Practices")
+say("================================================================================")
+say("")
+say("The OS.ProcessManager module provides powerful process control capabilities.")
+say("")
+say("Key points:")
+say("  1. Process enumeration works on all platforms")
+say("  2. Memory operations require elevated privileges")
+say("  3. DLL injection is platform-specific and requires admin rights")
+say("  4. Always handle exceptions when working with other processes")
+say("  5. Be careful with process termination and injection")
+say("")
+say("Security considerations:")
+say("  - These APIs can be dangerous if misused")
+say("  - Always verify PIDs before performing destructive operations")
+say("  - Respect user privacy and system security")
+say("  - Some operations may be restricted by OS security policies")
+say("")
+say("Use cases:")
+say("  - System monitoring and administration")
+say("  - Process debugging and diagnostics")
+say("  - Automated testing and QA")
+say("  - Security research (with proper authorization)")
+say("")
+say("================================================================================")
+say("Demo completed successfully!")
+say("================================================================================")

@@ -1,0 +1,206 @@
+# ============================================================================
+# Interactive Piano Game
+# ============================================================================
+#
+# Play piano in real-time using your keyboard!
+#
+# Keyboard Layout (Piano Keys):
+# 
+#   Black Keys:  w e   t y u   o p
+#              ┌─┬─┐ ┌─┬─┬─┐ ┌─┬─┐
+#   White Keys: a s d f g h j k l
+#
+# Controls:
+#   - a-l keys: Play white piano notes (C4 to D5)
+#   - w,e,t,y,u,o,p: Play black keys (sharps/flats)
+#   - q or ESC: Exit the game
+#   - Space: Play C Major chord
+#   - 1: Play demo melody
+#
+# Run with: ./levython examples/38_interactive_piano.levy
+# ============================================================================
+
+import os
+import input
+import datetime
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║           Interactive Piano - Levython                     ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+
+# Musical note frequencies (in Hz)
+# Use lowercase keys - what input.poll() actually returns
+notes <- {
+    # White keys (a-l)
+    "a": 261.63,      # C4
+    "s": 293.66,      # D4
+    "d": 329.63,      # E4
+    "f": 349.23,      # F4
+    "g": 392.00,      # G4
+    "h": 440.00,      # A4
+    "j": 493.88,      # B4
+    "k": 523.25,      # C5
+    "l": 587.33,      # D5
+    
+    # Black keys (sharps/flats)
+    "w": 277.18,      # C#4
+    "e": 311.13,      # D#4
+    "t": 369.99,      # F#4
+    "y": 415.30,      # G#4
+    "u": 466.16,      # A#4
+    "o": 554.37,      # C#5
+    "p": 622.25       # D#5
+}
+
+note_names <- {
+    "a": "C4",  "s": "D4",  "d": "E4",  "f": "F4",  "g": "G4",
+    "h": "A4",  "j": "B4",  "k": "C5",  "l": "D5",
+    "w": "C#4", "e": "D#4", "t": "F#4", "y": "G#4", "u": "A#4",
+    "o": "C#5", "p": "D#5"
+}
+
+# Display the piano keyboard
+act show_keyboard() {
+    say("")
+    say("┌─────────────────────────────────────────────────────────┐")
+    say("│  w   e       t   y   u       o   p      (Black Keys)   │")
+    say("│ ┌─┬─┬─┐   ┌─┬─┬─┬─┬─┐   ┌─┬─┐                        │")
+    say("│ │ │ │ │   │ │ │ │ │ │   │ │ │                        │")
+    say("│ a─┴s┴─d   f─┴g┴─h┴─j   k─┴l─┘         (White Keys)   │")
+    say("│ C4  D4 E4 F4  G4  A4  B4 C5 D5                        │")
+    say("└─────────────────────────────────────────────────────────┘")
+    say("")
+    say("🎹 Press keys to play! | Space = Chord | 1 = Demo | Q/ESC = Exit")
+    say("")
+}
+
+# Play a note with visual feedback
+act play_note(key) {
+    try {
+        freq <- notes[key]
+        name <- note_names[key]
+        
+        # Show visual feedback
+        say("  ♪ " + name + " (" + str(freq) + " Hz) - Key: " + key)
+        
+        # Play the tone (0.3 seconds, volume 0.4)
+        os.Audio.play_tone(freq, 0.3, 0.4)
+        
+        -> true
+    } catch error {
+        -> false
+    }
+}
+
+# Play a chord (multiple notes)
+act play_chord() {
+    say("  ♫ C Major Chord (C4 + E4 + G4)")
+    
+    # C Major chord: C4, E4, G4
+    os.Audio.play_tone(261.63, 0.5, 0.3)  # C4
+    os.sleep(0.01)
+    os.Audio.play_tone(329.63, 0.5, 0.3)  # E4
+    os.sleep(0.01)
+    os.Audio.play_tone(392.00, 0.5, 0.3)  # G4
+}
+
+# Simple melody demo
+act play_demo() {
+    say("  🎵 Playing 'Twinkle Twinkle Little Star'...")
+    say("")
+    
+    melody <- ["a", "a", "g", "g", "h", "h", "g",
+               "f", "f", "d", "d", "s", "s", "a"]
+    durations <- [0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.6,
+                  0.3, 0.3, 0.3, 0.3, 0.3, 0.3, 0.6]
+    
+    i <- 0
+    while i < len(melody) {
+        key <- melody[i]
+        duration <- durations[i]
+        
+        try {
+            freq <- notes[key]
+            say("    ♪ " + note_names[key])
+            os.Audio.play_tone(freq, duration, 0.4)
+            os.sleep(duration + 0.05)
+        } catch error {
+            # Skip invalid keys
+        }
+        
+        i <- i + 1
+    }
+    
+    say("")
+    say("  ✓ Demo complete! Back to free play...")
+    say("")
+}
+
+# Show the keyboard
+show_keyboard()
+
+# Enable raw mode for real-time key capture
+say("Starting interactive mode...")
+say("")
+
+ok <- input.enable_raw()
+if not ok {
+    say("⚠ Could not enable raw input mode (not a TTY).")
+    say("  Falling back to demo mode...")
+    say("")
+    
+    # Fallback: play a quick scale demo
+    say("Playing C major scale...")
+    scale <- ["a", "s", "d", "f", "g", "h", "j", "k"]
+    i <- 0
+    while i < len(scale) {
+        key <- scale[i]
+        try {
+            freq <- notes[key]
+            say("  ♪ " + note_names[key] + " - " + str(freq) + " Hz")
+            os.Audio.play_tone(freq, 0.4, 0.5)
+            os.sleep(0.45)
+        } catch error {
+            # Skip invalid keys
+        }
+        i <- i + 1
+    }
+    say("")
+    say("✓ Done!")
+} else {
+    # Real-time interactive piano loop
+    running <- true
+    
+    while running {
+        r <- input.poll()
+        
+        if r["ok"] == yes {
+            key <- r["key"]
+            code <- r["code"]
+            
+            # Check for exit: Q or ESC (code 27)
+            if key == "q" or code == 27 {
+                running <- false
+            # Space = play chord
+            } else if key == " " {
+                play_chord()
+            # 1 = play demo melody
+            } else if key == "1" {
+                play_demo()
+            # Try to play a note with the pressed key
+            } else {
+                play_note(key)
+            }
+        }
+        
+        # Small sleep to avoid busy-waiting
+        datetime.sleep_ms(10)
+    }
+    
+    # Restore terminal
+    input.disable_raw()
+    
+    say("")
+    say("🎵 Thanks for playing! 🎵")
+}

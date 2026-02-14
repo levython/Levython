@@ -1,0 +1,238 @@
+# ============================================================================
+# Real-Time Interactive Piano Game
+# ============================================================================
+#
+# Play piano in real-time with your keyboard!
+#
+# Keyboard Layout:
+#   White Keys: A S D F G H J K L (C4-D5)
+#   Black Keys: W E T Y U (sharps/flats)  
+#   Commands: Q=quit, 1=scale, 2=chord, 3=song
+#
+# Run with: ./levython examples/41_piano_game.levy
+# ============================================================================
+
+import input
+import os
+
+say("╔════════════════════════════════════════════════════════════╗")
+say("║         🎹 Real-Time Interactive Piano Game 🎹            ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+
+# Piano notes mapping
+notes <- {
+    "a": ["C4", 261.63],
+    "s": ["D4", 293.66],
+    "d": ["E4", 329.63],
+    "f": ["F4", 349.23],
+    "g": ["G4", 392.00],
+    "h": ["A4", 440.00],
+    "j": ["B4", 493.88],
+    "k": ["C5", 523.25],
+    "l": ["D5", 587.33],
+    ";": ["E5", 659.25],
+    
+    "w": ["C#4", 277.18],
+    "e": ["D#4", 311.13],
+    "t": ["F#4", 369.99],
+    "y": ["G#4", 415.30],
+    "u": ["A#4", 466.16],
+    "o": ["C#5", 554.37],
+    "p": ["D#5", 622.25]
+}
+
+# Display piano keyboard
+say("┌──────────────────────────────────────────────────────────┐")
+say("│   W   E       T   Y   U       O   P    (Black Keys)     │")
+say("│  ┌─┬─┬─┐   ┌─┬─┬─\u2702─┬─┐   ┌─┬─┬─┐                      │")
+say("│  │ │ │ │   │ │ │ │ │ │   │ │ │ │                      │")
+say("│  A─┴S┴─D   F─┴G┴─H┴─J┴─K   L─┴;───┘                     │")
+say("│  C4  D4 E4 F4  G4  A4  B4 C5 D5 E5                      │")
+say("└──────────────────────────────────────────────────────────┘")
+say("")
+say("Controls:")
+say("  🎹 Press piano keys (A-L, ; for white keys)")
+say("  🎵 Press W, E, T, Y, U, O, P for black keys (sharps)")
+say("  1️⃣  Press '1' to play a C major scale")
+say("  2️⃣  Press '2' to play a C major chord")
+say("  3️⃣  Press '3' to play 'Twinkle Twinkle Little Star'")
+say("  ❌ Press 'Q' to quit")
+say("")
+
+# Play a single note
+act play_note(key) {
+    if notes[key] != none {
+        note_info <- notes[key]
+        name <- note_info[0]
+        freq <- note_info[1]
+        
+        say("♪ " + name + " (" + str(freq) + " Hz)")
+        os.Audio.play_tone(freq, 0.3, 0.5)
+        -> true
+    }
+    -> false
+}
+
+# Play scale
+act play_scale() {
+    say("")
+    say("🎵 Playing C Major Scale...")
+    scale_keys <- ["a", "s", "d", "f", "g", "h", "j", "k"]
+    
+    for key in scale_keys {
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, 0.35, 0.5)
+            os.sleep(0.4)
+        }
+    }
+    say("✓ Scale complete!")
+    say("")
+}
+
+# Play chord
+act play_chord() {
+    say("")
+    say("♫ Playing C Major Chord (C-E-G)...")
+    
+    #  Staggered start for richer sound
+    os.Audio.play_tone(261.63, 0.9, 0.35)  # C4
+    os.sleep(0.02)
+    os.Audio.play_tone(329.63, 0.9, 0.35)  # E4
+    os.sleep(0.02)
+    os.Audio.play_tone(392.00, 0.9, 0.35)  # G4
+    
+    os.sleep(1.0)
+    say("✓ Chord complete!")
+    say("")
+}
+
+# Play song
+act play_song() {
+    say("")
+    say("\u266b Playing 'Twinkle Twinkle Little Star'...")
+    say("")
+    
+    # First line: Twinkle twinkle little star
+    melody1 <- ["a", "a", "h", "h", "j", "j", "h"]
+    durations1 <- [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.8]
+    
+    say("♫ Twinkle twinkle little star...")
+    
+    i <- 0
+    while i < len(melody1) {
+        key <- melody1[i]
+        duration <- durations1[i]
+        
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, duration, 0.45)
+            os.sleep(duration + 0.05)
+        }
+        
+        i <- i + 1
+    }
+    
+    os.sleep(0.2)
+    
+    # Second line: How I wonder what you are
+    melody2 <- ["g", "g", "f", "f", "d", "d", "a"]
+    durations2 <- [0.4, 0.4, 0.4, 0.4, 0.4, 0.4, 0.8]
+    
+    say("♫ How I wonder what you are...")
+    
+    i <- 0
+    while i < len(melody2) {
+        key <- melody2[i]
+        duration <- durations2[i]
+        
+        if notes[key] != none {
+            note_info <- notes[key]
+            name <- note_info[0]
+            freq <- note_info[1]
+            say("  ♪ " + name)
+            os.Audio.play_tone(freq, duration, 0.45)
+            os.sleep(duration + 0.05)
+        }
+        
+        i <- i + 1
+    }
+    
+    say("")
+    say("✓ Song complete!")
+    say("")
+}
+
+# Enable raw input mode
+say("🎹 Starting piano... (press any key to begin)")
+say("")
+
+ok <- input.enable_raw()
+if not ok {
+    say("❌ Error: Could not enable raw input mode (not a TTY)")
+    say("   Piano requires terminal input access")
+} else {
+    say("✅ Piano ready! Start playing!")
+    say("")
+    
+    running <- true
+    note_count <- 0
+    
+    # Main game loop
+    while running {
+        # Poll for key press
+        r <- input.poll()
+        
+        if r["ok"] == yes {
+            key <- r["key"]
+            
+            # Check for quit
+            if key == "q" or key == "Q" {
+                running <- false
+                say("")
+                say("👋 Quitting piano...")
+            }
+            # Check for commands
+            else if key == "1" {
+                play_scale()
+            }
+            else if key == "2" {
+                play_chord()
+            }
+            else if key == "3" {
+                play_song()
+            }
+            # Play piano note
+            else {
+                if play_note(key) {
+                    note_count <- note_count + 1
+                }
+            }
+        }
+        
+        # Small delay to reduce CPU usage
+        os.sleep(0.01)
+    }
+    
+    # Disable raw input
+    input.disable_raw()
+}
+
+say("")
+say("╔════════════════════════════════════════════════════════════╗")
+say("║  🎵 Thanks for playing! You played " + str(note_count) + " notes!           ║")
+say("╚════════════════════════════════════════════════════════════╝")
+say("")
+say("Tips:")
+say("  • Try playing simple melodies like 'Mary Had a Little Lamb'")
+say("  • Use black keys (W, E, T, Y, U) for jazzy sounds")
+say("  • Press multiple keys rapidly for chord effects")
+say("")
+say("🎵 Keep making music with Levython! 🎵")

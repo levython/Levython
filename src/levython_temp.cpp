@@ -2179,7 +2179,6 @@ public:
         keywords["in"] = TokType::IN;
         keywords["repeat"] = TokType::REPEAT;
         keywords["import"] = TokType::IMPORT;
-        keywords["return"] = TokType::RETURN_TOKEN;
         keywords["break"] = TokType::BREAK;      // Loop control
         keywords["continue"] = TokType::CONTINUE; // Loop control
         keywords["yes"] = TokType::TRUE;
