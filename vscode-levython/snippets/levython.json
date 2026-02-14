@@ -1,0 +1,1108 @@
+{
+	"Comment": {
+		"prefix": "#",
+		"body": ["# ${1:comment}"],
+		"description": "Single-line comment"
+	},
+	"Variable Assignment": {
+		"prefix": "var",
+		"body": ["${1:name} <- ${2:value}"],
+		"description": "Variable assignment"
+	},
+	"Say": {
+		"prefix": "say",
+		"body": ["say(${1:message})"],
+		"description": "Print message to console"
+	},
+	"Say with Variable": {
+		"prefix": "sayv",
+		"body": ["say(\"${1:message}: \" + str(${2:variable}))"],
+		"description": "Print message with variable"
+	},
+	"Ask": {
+		"prefix": "ask",
+		"body": ["${1:answer} <- ask(${2:\"prompt\"})"],
+		"description": "Get user input"
+	},
+	"Function": {
+		"prefix": "act",
+		"body": [
+			"act ${1:function_name}(${2:args}) {",
+			"\t${3:# function body}",
+			"\t-> ${4:result}",
+			"}"
+		],
+		"description": "Create a function"
+	},
+	"Void Function": {
+		"prefix": "actv",
+		"body": [
+			"act ${1:function_name}(${2:args}) {",
+			"\t${3:# function body}",
+			"}"
+		],
+		"description": "Create a void function"
+	},
+	"Lambda Function": {
+		"prefix": "lambda",
+		"body": ["act(${1:args}) { ${2:expression} }"],
+		"description": "Create a lambda function"
+	},
+	"If Statement": {
+		"prefix": "if",
+		"body": [
+			"if ${1:condition} {",
+			"\t${2:# code}",
+			"}"
+		],
+		"description": "If statement"
+	},
+	"If-Else Statement": {
+		"prefix": "ife",
+		"body": [
+			"if ${1:condition} {",
+			"\t${2:# if code}",
+			"} else {",
+			"\t${3:# else code}",
+			"}"
+		],
+		"description": "If-else statement"
+	},
+	"If-Elif-Else": {
+		"prefix": "ifeif",
+		"body": [
+			"if ${1:condition1} {",
+			"\t${2:# code}",
+			"} elif ${3:condition2} {",
+			"\t${4:# code}",
+			"} else {",
+			"\t${5:# code}",
+			"}"
+		],
+		"description": "If-elif-else statement"
+	},
+	"Ternary Operator": {
+		"prefix": "ternary",
+		"body": ["${1:result} <- ${2:condition} ? ${3:true_value} : ${4:false_value}"],
+		"description": "Ternary conditional operator (new in 1.0.3)"
+	},
+	"For Loop": {
+		"prefix": "for",
+		"body": [
+			"for ${1:item} in ${2:collection} {",
+			"\t${3:# code}",
+			"}"
+		],
+		"description": "For loop"
+	},
+	"For Range": {
+		"prefix": "forr",
+		"body": [
+			"for ${1:i} in range(${2:0}, ${3:10}) {",
+			"\t${4:# code}",
+			"}"
+		],
+		"description": "For loop with range"
+	},
+	"While Loop": {
+		"prefix": "while",
+		"body": [
+			"while ${1:condition} {",
+			"\t${2:# code}",
+			"}"
+		],
+		"description": "While loop"
+	},
+	"Class": {
+		"prefix": "class",
+		"body": [
+			"class ${1:ClassName} {",
+			"\tinit(${2:args}) {",
+			"\t\tself.${3:property} <- ${4:value}",
+			"\t}",
+			"\t",
+			"\t${5:method_name}(${6:args}) {",
+			"\t\t${7:# method body}",
+			"\t}",
+			"}"
+		],
+		"description": "Create a class"
+	},
+	"Abstract Class": {
+		"prefix": "abstract",
+		"body": [
+			"abstract class ${1:AbstractClass} {",
+			"\tinit(${2:args}) {",
+			"\t\t${3:# initialization}",
+			"\t}",
+			"\t",
+			"\tabstract ${4:method_name}(${5:args})",
+			"}"
+		],
+		"description": "Create an abstract class"
+	},
+	"Class with Inheritance": {
+		"prefix": "classext",
+		"body": [
+			"class ${1:ChildClass} is a ${2:ParentClass} {",
+			"\tinit(${3:args}) {",
+			"\t\tsuper.init(${4:parent_args})",
+			"\t\tself.${5:property} <- ${6:value}",
+			"\t}",
+			"\t",
+			"\t${7:method_name}(${8:args}) {",
+			"\t\t${9:# method body}",
+			"\t}",
+			"}"
+		],
+		"description": "Create a class with inheritance"
+	},
+	"Try-Catch": {
+		"prefix": "try",
+		"body": [
+			"try {",
+			"\t${1:# code that may throw}",
+			"} catch {",
+			"\t${2:# error handling}",
+			"}"
+		],
+		"description": "Try-catch block"
+	},
+	"Throw": {
+		"prefix": "throw",
+		"body": ["throw ${1:error_message}"],
+		"description": "Throw an exception"
+	},
+	"Import": {
+		"prefix": "imp",
+		"body": ["import ${1:module}"],
+		"description": "Import a module"
+	},
+	"List": {
+		"prefix": "list",
+		"body": ["${1:list_name} <- [${2:elements}]"],
+		"description": "Create a list"
+	},
+	"Map/Dictionary": {
+		"prefix": "map",
+		"body": ["${1:map_name} <- {${2:\"key\": value}}"],
+		"description": "Create a map/dictionary"
+	},
+	"Main Template": {
+		"prefix": "main",
+		"body": [
+			"#!/usr/bin/env levython",
+			"",
+			"# ${1:Script description}",
+			"",
+			"act main() {",
+			"\t${2:# main code}",
+			"}",
+			"",
+			"main()"
+		],
+		"description": "Main file template"
+	},
+	"HTTP GET": {
+		"prefix": "httpget",
+		"body": [
+			"import http",
+			"",
+			"response <- http.get(${1:\"https://api.example.com\"})",
+			"say(response[\"body\"])"
+		],
+		"description": "HTTP GET request"
+	},
+	"HTTP POST": {
+		"prefix": "httppost",
+		"body": [
+			"import http",
+			"",
+			"data <- {${1:\"key\": \"value\"}}",
+			"response <- http.post(${2:\"https://api.example.com\"}, data)",
+			"say(response[\"body\"])"
+		],
+		"description": "HTTP POST request"
+	},
+	"HTTP Server": {
+		"prefix": "httpserver",
+		"body": [
+			"import http_server",
+			"",
+			"act handler(req) {",
+			"\tif req[\"path\"] == \"${1:/}\" {",
+			"\t\t-> {\"status\": 200, \"body\": \"${2:Hello World}\"}",
+			"\t}",
+			"\t-> {\"status\": 404, \"body\": \"Not Found\"}",
+			"}",
+			"",
+			"http_server.serve(\"${3:127.0.0.1}\", ${4:8080}, handler)"
+		],
+		"description": "HTTP server"
+	},
+	"File Read": {
+		"prefix": "fread",
+		"body": [
+			"content <- read_file(${1:\"file.txt\"})"
+		],
+		"description": "Read file"
+	},
+	"File Write": {
+		"prefix": "fwrite",
+		"body": [
+			"write_file(${1:\"file.txt\"}, ${2:content})"
+		],
+		"description": "Write to file"
+	},
+	"OS Import": {
+		"prefix": "os",
+		"body": ["import os"],
+		"description": "Import OS module"
+	},
+	"OS File Operations": {
+		"prefix": "osfile",
+		"body": [
+			"# Check if file exists",
+			"if os.exists(${1:\"path\"}) {",
+			"\t${2:# file operations}",
+			"}"
+		],
+		"description": "OS file operations"
+	},
+	"OS Process": {
+		"prefix": "osproc",
+		"body": [
+			"result <- os.run(${1:\"command\"}, [${2:args}])",
+			"say(\"Exit code: \" + str(result))"
+		],
+		"description": "Run OS process"
+	},
+	"OS Run Capture": {
+		"prefix": "osruncap",
+		"body": [
+			"result <- os.run_capture(${1:\"command\"}, [${2:args}], ${3:5000})",
+			"say(\"stdout: \" + result[\"stdout\"])",
+			"say(\"stderr: \" + result[\"stderr\"])",
+			"say(\"exit code: \" + str(result[\"code\"]))"
+		],
+		"description": "Run OS process and capture output"
+	},
+	"OS Hooks - Register": {
+		"prefix": "oshook",
+		"body": [
+			"import os",
+			"",
+			"hook_id <- OS.Hooks.register(\"${1:PROCESS_CREATE}\", \"${2:description}\")",
+			"OS.Hooks.set_callback(hook_id, act(event) {",
+			"\tsay(\"Event: \" + str(event))",
+			"\t${3:# handle event}",
+			"})",
+			"OS.Hooks.enable(hook_id)"
+		],
+		"description": "Register and enable OS hook"
+	},
+	"OS Hooks - Process": {
+		"prefix": "oshookproc",
+		"body": [
+			"OS.Hooks.hook_process_create(${1:pid})"
+		],
+		"description": "Hook process creation"
+	},
+	"OS Hooks - File Access": {
+		"prefix": "oshookfile",
+		"body": [
+			"OS.Hooks.hook_file_access(${1:\"/path/to/file\"}, \"${2:read}\")"
+		],
+		"description": "Hook file access events"
+	},
+	"OS Hooks - Keyboard": {
+		"prefix": "oshookkey",
+		"body": [
+			"OS.Hooks.hook_keyboard(${1:key_code}, ${2:true})"
+		],
+		"description": "Hook keyboard events"
+	},
+	"OS Hooks - Mouse": {
+		"prefix": "oshookmouse",
+		"body": [
+			"OS.Hooks.hook_mouse(${1:x}, ${2:y}, ${3:0}, ${4:true})"
+		],
+		"description": "Hook mouse events"
+	},
+	"OS InputControl - Keyboard": {
+		"prefix": "osinputkey",
+		"body": [
+			"OS.InputControl.capture_keyboard()",
+			"OS.InputControl.type_text(${1:\"Hello World\"})",
+			"OS.InputControl.release_keyboard()"
+		],
+		"description": "Keyboard input control"
+	},
+	"OS InputControl - Type Text": {
+		"prefix": "osinputtype",
+		"body": [
+			"OS.InputControl.type_text(${1:\"text\"})"
+		],
+		"description": "Type text with natural delays"
+	},
+	"OS InputControl - Press Key": {
+		"prefix": "osinputpress",
+		"body": [
+			"OS.InputControl.press_key(${1:\"A\"})",
+			"OS.InputControl.release_key(${1:\"A\"})"
+		],
+		"description": "Press and release a key"
+	},
+	"OS InputControl - Tap Key": {
+		"prefix": "osinputtap",
+		"body": [
+			"OS.InputControl.tap_key(${1:\"ENTER\"})"
+		],
+		"description": "Tap a key (press and release)"
+	},
+	"OS InputControl - Mouse": {
+		"prefix": "osinputmouse",
+		"body": [
+			"OS.InputControl.capture_mouse()",
+			"OS.InputControl.move_mouse(${1:500}, ${2:300})",
+			"OS.InputControl.mouse_click(\"${3:LEFT}\", ${4:true})",
+			"OS.InputControl.release_mouse()"
+		],
+		"description": "Mouse input control"
+	},
+	"OS InputControl - Mouse Click": {
+		"prefix": "osinputclick",
+		"body": [
+			"OS.InputControl.click_mouse_button(\"${1:LEFT}\", ${2:1})"
+		],
+		"description": "Click mouse button"
+	},
+	"OS InputControl - Scroll": {
+		"prefix": "osinputscroll",
+		"body": [
+			"OS.InputControl.scroll_mouse(${1:0}, ${2:-10})"
+		],
+		"description": "Scroll mouse wheel"
+	},
+	"OS InputControl - Remap Key": {
+		"prefix": "osinputremap",
+		"body": [
+			"OS.InputControl.remap_key(${1:\"A\"}, ${2:\"B\"})"
+		],
+		"description": "Remap keyboard key"
+	},
+	"OS InputControl - Block Key": {
+		"prefix": "osinputblock",
+		"body": [
+			"OS.InputControl.block_key(${1:\"ESC\"})"
+		],
+		"description": "Block a keyboard key"
+	},
+	"Input Chr/Ord": {
+		"prefix": "inputchr",
+		"body": [
+			"char <- input.chr(${1:65})  # ASCII to character",
+			"code <- input.ord(${2:\"A\"})  # Character to ASCII"
+		],
+		"description": "Convert between ASCII and characters"
+	},
+	"OS Processes - List": {
+		"prefix": "osproclist",
+		"body": [
+			"procs <- OS.Processes.list()",
+			"for proc in procs {",
+			"\tsay(\"PID: \" + str(proc[\"pid\"]) + \" - \" + proc[\"name\"])",
+			"}"
+		],
+		"description": "List all processes"
+	},
+	"OS Processes - Create": {
+		"prefix": "osproccreate",
+		"body": [
+			"opts <- {",
+			"\t\"cwd\": \"${1:/tmp}\",",
+			"\t\"env\": {${2:\"VAR\": \"value\"}}",
+			"}",
+			"pid <- OS.Processes.create(${3:\"command\"}, [${4:args}], opts)"
+		],
+		"description": "Create process with options"
+	},
+	"OS Processes - Control": {
+		"prefix": "osproccontrol",
+		"body": [
+			"OS.Processes.suspend(${1:pid})",
+			"OS.Processes.resume(${1:pid})",
+			"OS.Processes.terminate(${1:pid}, ${2:false})"
+		],
+		"description": "Control process (suspend/resume/terminate)"
+	},
+	"OS Processes - Memory": {
+		"prefix": "osprocmem",
+		"body": [
+			"data <- OS.Processes.read_memory(${1:pid}, ${2:0x400000}, ${3:256})",
+			"OS.Processes.write_memory(${1:pid}, ${2:0x400000}, ${4:data})"
+		],
+		"description": "Process memory operations"
+	},
+	"OS Processes - Priority": {
+		"prefix": "osprocprio",
+		"body": [
+			"OS.Processes.set_priority(${1:pid}, \"${2:HIGH}\")"
+		],
+		"description": "Set process priority"
+	},
+	"OS Processes - Get Info": {
+		"prefix": "osprocinfo",
+		"body": [
+			"info <- OS.Processes.get_info(${1:pid})",
+			"say(\"Name: \" + info[\"name\"])",
+			"say(\"Status: \" + info[\"status\"])"
+		],
+		"description": "Get process information"
+	},
+	"OS Display - List": {
+		"prefix": "osdisplay",
+		"body": [
+			"displays <- OS.Display.list()",
+			"for display in displays {",
+			"\tsay(\"Display: \" + str(display[\"id\"]))",
+			"}"
+		],
+		"description": "List all displays"
+	},
+	"OS Display - Capture": {
+		"prefix": "osdispcap",
+		"body": [
+			"img <- OS.Display.capture_screen(${1:0})"
+		],
+		"description": "Capture screen"
+	},
+	"OS Display - Capture Region": {
+		"prefix": "osdispregion",
+		"body": [
+			"region <- OS.Display.capture_region(${1:0}, ${2:0}, ${3:800}, ${4:600})"
+		],
+		"description": "Capture screen region"
+	},
+	"OS Display - Get Pixel": {
+		"prefix": "osdisppixel",
+		"body": [
+			"color <- OS.Display.get_pixel(${1:100}, ${2:100}, ${3:0})"
+		],
+		"description": "Get pixel color"
+	},
+	"OS Display - Cursor": {
+		"prefix": "osdispcursor",
+		"body": [
+			"OS.Display.hide_cursor()",
+			"# ${1:code}",
+			"OS.Display.show_cursor()"
+		],
+		"description": "Hide/show cursor"
+	},
+	"OS Audio - List Devices": {
+		"prefix": "osaudio",
+		"body": [
+			"devices <- OS.Audio.list_devices(\"${1:all}\")",
+			"for device in devices {",
+			"\tsay(device[\"name\"])",
+			"}"
+		],
+		"description": "List audio devices"
+	},
+	"OS Audio - Volume": {
+		"prefix": "osaudiovol",
+		"body": [
+			"vol <- OS.Audio.get_volume()",
+			"OS.Audio.set_volume(${1:0.75})"
+		],
+		"description": "Get/set volume"
+	},
+	"OS Audio - Play Sound": {
+		"prefix": "osaudioplay",
+		"body": [
+			"OS.Audio.play_sound(${1:\"/path/to/sound.wav\"}, ${2:0.8})"
+		],
+		"description": "Play sound file"
+	},
+	"OS Audio - Play Tone": {
+		"prefix": "osaudiotone",
+		"body": [
+			"OS.Audio.play_tone(${1:440}, ${2:1000}, ${3:0.5})"
+		],
+		"description": "Play tone (frequency, duration, volume)"
+	},
+	"OS Audio - Record": {
+		"prefix": "osaudiorec",
+		"body": [
+			"audio_data <- OS.Audio.record(${1:5000})"
+		],
+		"description": "Record audio"
+	},
+	"OS Audio - Stream": {
+		"prefix": "osaudiostream",
+		"body": [
+			"config <- {",
+			"\t\"sample_rate\": ${1:44100},",
+			"\t\"channels\": ${2:2}",
+			"}",
+			"stream <- OS.Audio.create_stream(config)",
+			"OS.Audio.write_stream(stream, ${3:audio_data})",
+			"OS.Audio.close_stream(stream)"
+		],
+		"description": "Create audio stream"
+	},
+	"OS Privileges - Check": {
+		"prefix": "ospriv",
+		"body": [
+			"if OS.Privileges.is_elevated() {",
+			"\t${1:# elevated code}",
+			"} else {",
+			"\tsay(\"Not elevated\")",
+			"}"
+		],
+		"description": "Check privilege level"
+	},
+	"OS Privileges - Elevate": {
+		"prefix": "osprivelevate",
+		"body": [
+			"if OS.Privileges.can_elevate() {",
+			"\tOS.Privileges.request_elevation(${1:\"reason\"})",
+			"}"
+		],
+		"description": "Request privilege elevation"
+	},
+	"OS Privileges - Run as Admin": {
+		"prefix": "osprivadmin",
+		"body": [
+			"OS.Privileges.run_as_admin(${1:\"command\"}, [${2:args}])"
+		],
+		"description": "Run command as administrator"
+	},
+	"OS Privileges - Get Level": {
+		"prefix": "osprivlevel",
+		"body": [
+			"level <- OS.Privileges.get_level()",
+			"say(\"Privilege level: \" + level)"
+		],
+		"description": "Get privilege level"
+	},
+	"OS Events - Watch File": {
+		"prefix": "oseventfile",
+		"body": [
+			"listener <- OS.Events.watch_file(${1:\"/path\"}, [${2:\"created\", \"modified\"}], act(event) {",
+			"\tsay(\"File \" + event[\"type\"] + \": \" + event[\"path\"])",
+			"})"
+		],
+		"description": "Watch file/directory for changes"
+	},
+	"OS Events - Watch Network": {
+		"prefix": "oseventnet",
+		"body": [
+			"listener <- OS.Events.watch_network(act(event) {",
+			"\tsay(\"Network: \" + event[\"type\"])",
+			"})"
+		],
+		"description": "Watch network events"
+	},
+	"OS Events - Watch Power": {
+		"prefix": "oseventpwr",
+		"body": [
+			"listener <- OS.Events.watch_power(act(event) {",
+			"\tsay(\"Power: \" + event[\"status\"])",
+			"})"
+		],
+		"description": "Watch power events"
+	},
+	"OS Events - Poll": {
+		"prefix": "oseventpoll",
+		"body": [
+			"events <- OS.Events.poll(${1:1000})",
+			"for event in events {",
+			"\tsay(str(event))",
+			"}"
+		],
+		"description": "Poll for events"
+	},
+	"OS Events - Event Loop": {
+		"prefix": "oseventloop",
+		"body": [
+			"# Start event loop (blocking)",
+			"OS.Events.start_loop()"
+		],
+		"description": "Start event loop"
+	},
+	"OS Persistence - Autostart": {
+		"prefix": "ospersistauto",
+		"body": [
+			"OS.Persistence.add_autostart(${1:\"app_name\"}, ${2:\"/path/to/app\"}, \"${3:user}\")"
+		],
+		"description": "Add autostart entry"
+	},
+	"OS Persistence - Service": {
+		"prefix": "ospersistsvc",
+		"body": [
+			"OS.Persistence.install_service(",
+			"\t${1:\"service_name\"},",
+			"\t${2:\"Display Name\"},",
+			"\t${3:\"Description\"},",
+			"\t${4:\"/path/to/service\"},",
+			"\t${5:true}",
+			")"
+		],
+		"description": "Install service"
+	},
+	"OS Persistence - Service Control": {
+		"prefix": "ospersistctl",
+		"body": [
+			"OS.Persistence.start_service(${1:\"service_name\"})",
+			"status <- OS.Persistence.get_service_status(${1:\"service_name\"})",
+			"OS.Persistence.stop_service(${1:\"service_name\"})"
+		],
+		"description": "Control service"
+	},
+	"OS Persistence - Scheduled Task": {
+		"prefix": "ospersistsched",
+		"body": [
+			"OS.Persistence.add_scheduled_task(",
+			"\t${1:\"task_name\"},",
+			"\t${2:\"/path/to/script\"},",
+			"\t\"${3:daily}\",",
+			"\t\"${4:09:00}\"",
+			")"
+		],
+		"description": "Add scheduled task"
+	},
+	"Async Spawn": {
+		"prefix": "async",
+		"body": [
+			"import async",
+			"",
+			"task <- async.spawn(act() {",
+			"\t${1:# async code}",
+			"\t-> ${2:result}",
+			"})",
+			"",
+			"result <- async.await(task)"
+		],
+		"description": "Async task"
+	},
+	"Async Sleep": {
+		"prefix": "asyncsleep",
+		"body": ["async.sleep(${1:1000})"],
+		"description": "Async sleep (milliseconds)"
+	},
+	"Thread Spawn": {
+		"prefix": "thread",
+		"body": [
+			"import thread",
+			"",
+			"t <- thread.spawn(act() {",
+			"\t${1:# thread code}",
+			"})",
+			"",
+			"thread.join(t)"
+		],
+		"description": "Spawn thread"
+	},
+	"Channel": {
+		"prefix": "channel",
+		"body": [
+			"import channel",
+			"",
+			"ch <- channel.create()",
+			"",
+			"# Send",
+			"channel.send(ch, ${1:value})",
+			"",
+			"# Receive",
+			"value <- channel.recv(ch)"
+		],
+		"description": "Create and use channel"
+	},
+	"TCP Server": {
+		"prefix": "tcpserver",
+		"body": [
+			"import net",
+			"",
+			"server <- net.tcp_listen(\"${1:0.0.0.0}\", ${2:8080})",
+			"say(\"Server listening on port ${2:8080}\")",
+			"",
+			"while true {",
+			"\tclient <- net.tcp_accept(server)",
+			"\t${3:# handle client}",
+			"}"
+		],
+		"description": "TCP server"
+	},
+	"TCP Client": {
+		"prefix": "tcpclient",
+		"body": [
+			"import net",
+			"",
+			"conn <- net.tcp_connect(\"${1:localhost}\", ${2:8080})",
+			"net.tcp_send(conn, ${3:data})",
+			"response <- net.tcp_recv(conn, ${4:1024})",
+			"net.tcp_close(conn)"
+		],
+		"description": "TCP client"
+	},
+	"JSON Parse": {
+		"prefix": "jsonparse",
+		"body": [
+			"import json",
+			"",
+			"data <- json.parse(${1:json_string})"
+		],
+		"description": "Parse JSON"
+	},
+	"JSON Stringify": {
+		"prefix": "jsonstr",
+		"body": [
+			"import json",
+			"",
+			"json_str <- json.stringify(${1:data})"
+		],
+		"description": "Convert to JSON string"
+	},
+	"Crypto SHA256": {
+		"prefix": "sha256",
+		"body": [
+			"import crypto",
+			"",
+			"hash <- crypto.sha256(${1:data})"
+		],
+		"description": "SHA256 hash"
+	},
+	"Crypto Random": {
+		"prefix": "cryptorand",
+		"body": [
+			"import crypto",
+			"",
+			"random_data <- crypto.random_bytes(${1:32})"
+		],
+		"description": "Generate random bytes"
+	},
+	"Crypto HMAC": {
+		"prefix": "hmac",
+		"body": [
+			"import crypto",
+			"",
+			"hmac <- crypto.hmac_sha256(${1:data}, ${2:key})"
+		],
+		"description": "HMAC-SHA256"
+	},
+	"Base64 Encode": {
+		"prefix": "b64enc",
+		"body": [
+			"import crypto",
+			"",
+			"encoded <- crypto.base64_encode(${1:data})"
+		],
+		"description": "Base64 encode"
+	},
+	"Base64 Decode": {
+		"prefix": "b64dec",
+		"body": [
+			"import crypto",
+			"",
+			"decoded <- crypto.base64_decode(${1:encoded})"
+		],
+		"description": "Base64 decode"
+	},
+	"DateTime Now": {
+		"prefix": "dtnow",
+		"body": [
+			"import datetime",
+			"",
+			"now <- datetime.now_utc()"
+		],
+		"description": "Get current datetime"
+	},
+	"DateTime Format": {
+		"prefix": "dtfmt",
+		"body": [
+			"import datetime",
+			"",
+			"formatted <- datetime.format(${1:timestamp}, \"${2:%Y-%m-%d %H:%M:%S}\")"
+		],
+		"description": "Format datetime"
+	},
+	"Logging": {
+		"prefix": "log",
+		"body": [
+			"import log",
+			"",
+			"log.set_level(\"${1:info}\")",
+			"log.info(${2:\"message\"})"
+		],
+		"description": "Logging setup"
+	},
+	"Log Levels": {
+		"prefix": "loglevel",
+		"body": [
+			"log.debug(${1:\"debug message\"})",
+			"log.info(${2:\"info message\"})",
+			"log.warn(${3:\"warning message\"})",
+			"log.error(${4:\"error message\"})"
+		],
+		"description": "Log at different levels"
+	},
+	"Config Load": {
+		"prefix": "config",
+		"body": [
+			"import config",
+			"",
+			"config.load_env(${1:\".env\"})",
+			"value <- config.get(${2:\"KEY\"})"
+		],
+		"description": "Load configuration"
+	},
+	"Input Raw Mode": {
+		"prefix": "inputraw",
+		"body": [
+			"import input",
+			"",
+			"input.enable_raw()",
+			"${1:# read keys}",
+			"input.disable_raw()"
+		],
+		"description": "Enable raw input mode"
+	},
+	"Input Read Key": {
+		"prefix": "inputkey",
+		"body": [
+			"import input",
+			"",
+			"if input.key_available() {",
+			"\tkey <- input.read_key()",
+			"\tsay(\"Key: \" + key)",
+			"}"
+		],
+		"description": "Read keyboard input"
+	},
+	"Memory Operations": {
+		"prefix": "mem",
+		"body": [
+			"ptr <- mem_alloc(${1:1024})",
+			"mem_set(ptr, ${2:0}, ${1:1024})",
+			"mem_free(ptr)"
+		],
+		"description": "Memory operations"
+	},
+	"Bitwise Operations": {
+		"prefix": "bitwise",
+		"body": [
+			"result <- bit_and(${1:a}, ${2:b})",
+			"result <- bit_or(${1:a}, ${2:b})",
+			"result <- bit_xor(${1:a}, ${2:b})",
+			"result <- shift_left(${1:a}, ${2:n})"
+		],
+		"description": "Bitwise operations"
+	},
+	"Tensor Create": {
+		"prefix": "tensor",
+		"body": [
+			"t <- tensor([${1:data}], [${2:shape}])"
+		],
+		"description": "Create tensor"
+	},
+	"Tensor Operations": {
+		"prefix": "tensorop",
+		"body": [
+			"result <- tensor_add(${1:t1}, ${2:t2})",
+			"result <- tensor_mul(${1:t1}, ${2:t2})",
+			"result <- tensor_matmul(${1:t1}, ${2:t2})"
+		],
+		"description": "Tensor operations"
+	},
+	"SIMD Operations": {
+		"prefix": "simd",
+		"body": [
+			"result <- simd_add_f32(${1:a}, ${2:b})",
+			"result <- simd_mul_f32(${1:a}, ${2:b})"
+		],
+		"description": "SIMD operations"
+	},
+	"Random": {
+		"prefix": "random",
+		"body": [
+			"value <- random()",
+			"num <- random_int(${1:1}, ${2:100})",
+			"choice <- random_choice(${3:list})"
+		],
+		"description": "Random number generation"
+	},
+	"Assert": {
+		"prefix": "assert",
+		"body": ["assert(${1:condition}, ${2:\"message\"})"],
+		"description": "Assertion"
+	},
+	"Time": {
+		"prefix": "time",
+		"body": [
+			"start <- time_ms()",
+			"${1:# code}",
+			"elapsed <- time_ms() - start",
+			"say(\"Elapsed: \" + str(elapsed) + \"ms\")"
+		],
+		"description": "Time measurement"
+	},
+	"Sleep": {
+		"prefix": "sleep",
+		"body": ["sleep(${1:1})"],
+		"description": "Sleep (seconds)"
+	},
+	"Sleep Milliseconds": {
+		"prefix": "sleepms",
+		"body": ["sleep_ms(${1:1000})"],
+		"description": "Sleep (milliseconds)"
+	},
+	"String Operations": {
+		"prefix": "str",
+		"body": [
+			"upper <- upper(${1:text})",
+			"lower <- lower(${1:text})",
+			"trimmed <- trim(${1:text})",
+			"replaced <- replace(${1:text}, ${2:old}, ${3:new})"
+		],
+		"description": "String operations"
+	},
+	"List Operations": {
+		"prefix": "listop",
+		"body": [
+			"append(${1:list}, ${2:item})",
+			"insert(${1:list}, ${3:index}, ${2:item})",
+			"remove(${1:list}, ${2:item})",
+			"popped <- pop(${1:list})"
+		],
+		"description": "List operations"
+	},
+	"Map Operations": {
+		"prefix": "mapop",
+		"body": [
+			"ks <- keys(${1:map})",
+			"vals <- values(${1:map})",
+			"entries <- items(${1:map})",
+			"exists <- has(${1:map}, ${2:key})"
+		],
+		"description": "Map/dictionary operations"
+	},
+	"Filter": {
+		"prefix": "filter",
+		"body": [
+			"filtered <- filter(${1:list}, act(${2:item}) {",
+			"\t-> ${3:condition}",
+			"})"
+		],
+		"description": "Filter list"
+	},
+	"Map Function": {
+		"prefix": "mapfn",
+		"body": [
+			"mapped <- map(${1:list}, act(${2:item}) {",
+			"\t-> ${3:transformation}",
+			"})"
+		],
+		"description": "Map function over list"
+	},
+	"Reduce": {
+		"prefix": "reduce",
+		"body": [
+			"result <- reduce(${1:list}, act(${2:acc}, ${3:item}) {",
+			"\t-> ${4:acc + item}",
+			"}, ${5:initial})"
+		],
+		"description": "Reduce list"
+	},
+	"Enumerate": {
+		"prefix": "enumerate",
+		"body": [
+			"for pair in enumerate(${1:list}) {",
+			"\tindex <- pair[0]",
+			"\tvalue <- pair[1]",
+			"\tsay(str(index) + \": \" + str(value))",
+			"}"
+		],
+		"description": "Enumerate list with indices"
+	},
+	"Zip": {
+		"prefix": "zip",
+		"body": [
+			"for pair in zip(${1:list1}, ${2:list2}) {",
+			"\ta <- pair[0]",
+			"\tb <- pair[1]",
+			"\t${3:# code}",
+			"}"
+		],
+		"description": "Zip two lists"
+	},
+	"Sorted": {
+		"prefix": "sorted",
+		"body": [
+			"sorted_list <- sorted(${1:list})"
+		],
+		"description": "Sort list"
+	},
+	"Reversed": {
+		"prefix": "reversed",
+		"body": [
+			"reversed_list <- reversed(${1:list})"
+		],
+		"description": "Reverse list"
+	},
+	"Min/Max": {
+		"prefix": "minmax",
+		"body": [
+			"minimum <- min(${1:list})",
+			"maximum <- max(${1:list})"
+		],
+		"description": "Find minimum and maximum"
+	},
+	"Sum": {
+		"prefix": "sum",
+		"body": [
+			"total <- sum(${1:list})"
+		],
+		"description": "Sum of list elements"
+	},
+	"Math Functions": {
+		"prefix": "math",
+		"body": [
+			"result <- sqrt(${1:x})",
+			"result <- pow(${2:base}, ${3:exp})",
+			"result <- abs(${4:x})",
+			"result <- floor(${5:x})",
+			"result <- ceil(${6:x})",
+			"result <- round(${7:x})"
+		],
+		"description": "Math functions"
+	},
+	"Trigonometry": {
+		"prefix": "trig",
+		"body": [
+			"sine <- sin(${1:angle})",
+			"cosine <- cos(${1:angle})",
+			"tangent <- tan(${1:angle})"
+		],
+		"description": "Trigonometric functions"
+	},
+	"Type Checking": {
+		"prefix": "type",
+		"body": [
+			"t <- type(${1:value})",
+			"say(\"Type: \" + t)"
+		],
+		"description": "Check type"
+	},
+	"Type Conversion": {
+		"prefix": "convert",
+		"body": [
+			"s <- str(${1:value})",
+			"i <- int(${2:value})",
+			"f <- float(${3:value})",
+			"b <- bool(${4:value})"
+		],
+		"description": "Type conversion"
+	}
+}

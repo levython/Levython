@@ -1,0 +1,37 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dragon-inspired icon based on Levython branding -->
+  <!-- Gradient filled dragon silhouette -->
+  <defs>
+    <linearGradient id="dragonGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF4500;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FF6347;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF8C00;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Dragon body - S-curve -->
+  <path d="M16 4 Q10 8 12 14 Q14 18 10 22 Q8 26 10 30" 
+        stroke="url(#dragonGradient)" 
+        stroke-width="6" 
+        fill="none" 
+        stroke-linecap="round"/>
+  
+  <!-- Dragon head -->
+  <ellipse cx="16" cy="6" rx="4" ry="3" fill="url(#dragonGradient)"/>
+  
+  <!-- Dragon eye -->
+  <circle cx="17" cy="5.5" r="0.8" fill="white"/>
+  
+  <!-- Horn 1 -->
+  <path d="M14 4 L13 1" stroke="#FF4500" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Horn 2 -->
+  <path d="M18 4 L19 1" stroke="#FF4500" stroke-width="1.5" stroke-linecap="round"/>
+  
+  <!-- Small flame accent -->
+  <path d="M12 12 L10 11 L11 13 Z" fill="#FFA500" opacity="0.8"/>
+  <path d="M14 20 L12 19 L13 21 Z" fill="#FFA500" opacity="0.8"/>
+  
+  <!-- Tail flame -->
+  <path d="M10 28 L8 30 L9 28 L7 29 L8 27 L10 29 Z" fill="#FF6347" opacity="0.9"/>
+</svg>

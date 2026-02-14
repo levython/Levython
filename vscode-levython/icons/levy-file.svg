@@ -1,0 +1,14 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="32" height="32" rx="4" fill="#6B46C1"/>
+  
+  <!-- Lightning bolt (representing Levy + Python power) -->
+  <path d="M18 4L10 15H15L14 28L22 17H17L18 4Z" fill="#FFD700" stroke="#FFA500" stroke-width="1.5" stroke-linejoin="round"/>
+  
+  <!-- Decorative accent -->
+  <circle cx="25" cy="7" r="2" fill="#FFD700" opacity="0.8"/>
+  <circle cx="7" cy="25" r="2" fill="#FFD700" opacity="0.8"/>
+  
+  <!-- File corner fold -->
+  <path d="M28 0L28 6L32 6" fill="#5A3798" opacity="0.5"/>
+</svg>

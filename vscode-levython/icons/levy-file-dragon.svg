@@ -1,0 +1,45 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- File background with dragon theme -->
+  <defs>
+    <linearGradient id="dragonGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF4500;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FF0000;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF8C00;stop-opacity:1" />
+    </linearGradient>
+    <linearGradient id="fileGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFA07A;stop-opacity:0.2" />
+      <stop offset="100%" style="stop-color:#FF6347;stop-opacity:0.3" />
+    </linearGradient>
+  </defs>
+  
+  <!-- File shape -->
+  <rect x="4" y="2" width="20" height="28" rx="2" fill="url(#fileGrad)" stroke="url(#dragonGrad)" stroke-width="1.5"/>
+  
+  <!-- File corner fold -->
+  <path d="M24 2 L24 8 L28 8" fill="#FF6347" opacity="0.5"/>
+  <path d="M24 2 L24 8 L28 8" stroke="url(#dragonGrad)" stroke-width="1" fill="none"/>
+  
+  <!-- Dragon silhouette on file -->
+  <g transform="translate(8, 8)">
+    <!-- Dragon S-curve body -->
+    <path d="M8 2 Q6 4 7 7 Q8 9 6 11 Q5 13 6 15" 
+          stroke="url(#dragonGrad)" 
+          stroke-width="3" 
+          fill="none" 
+          stroke-linecap="round"/>
+    
+    <!-- Dragon head -->
+    <circle cx="8" cy="3" r="2" fill="url(#dragonGrad)"/>
+    
+    <!-- Eye -->
+    <circle cx="8.5" cy="2.8" r="0.5" fill="white"/>
+    
+    <!-- Horns -->
+    <line x1="7" y1="2" x2="6.5" y2="0.5" stroke="#FF4500" stroke-width="1" stroke-linecap="round"/>
+    <line x1="9" y1="2" x2="9.5" y2="0.5" stroke="#FF4500" stroke-width="1" stroke-linecap="round"/>
+    
+    <!-- Flame accents -->
+    <path d="M7 6 L5.5 5.5 L6 7 Z" fill="#FFA500" opacity="0.7"/>
+    <path d="M7 10 L5.5 9.5 L6 11 Z" fill="#FFA500" opacity="0.7"/>
+  </g>
+</svg>

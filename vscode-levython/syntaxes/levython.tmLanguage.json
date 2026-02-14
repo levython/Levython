@@ -78,15 +78,15 @@
             "patterns": [
                 {
                     "name": "keyword.control.flow.levython",
-                    "match": "\\b(if|else|for|while|in|break|continue|repeat)\\b"
+                    "match": "\\b(if|else|elif|for|while|in|break|continue|repeat|return)\\b"
                 },
                 {
                     "name": "keyword.control.exception.levython",
-                    "match": "\\b(try|catch|throw)\\b"
+                    "match": "\\b(try|catch|throw|finally)\\b"
                 },
                 {
                     "name": "keyword.control.import.levython",
-                    "match": "\\b(import)\\b"
+                    "match": "\\b(import|from|as)\\b"
                 },
                 {
                     "name": "keyword.other.function.levython",
@@ -94,11 +94,11 @@
                 },
                 {
                     "name": "keyword.other.class.levython",
-                    "match": "\\b(class|abstract|is_a|init)\\b"
+                    "match": "\\b(class|abstract|is_a|is|a|init)\\b"
                 },
                 {
                     "name": "variable.language.levython",
-                    "match": "\\b(self|this)\\b"
+                    "match": "\\b(self|this|super)\\b"
                 },
                 {
                     "name": "keyword.other.new.levython",
@@ -106,7 +106,7 @@
                 },
                 {
                     "name": "keyword.operator.ternary.levython",
-                    "match": "\\?"
+                    "match": "\\?|:"
                 },
                 {
                     "name": "keyword.operator.arrow.return.levython",
@@ -118,7 +118,7 @@
                 },
                 {
                     "name": "keyword.operator.compound.assignment.levython",
-                    "match": "(\\+=|-=|\\*=|/=)"
+                    "match": "(\\+=|-=|\\*=|/=|%=|\\^=)"
                 }
             ]
         },
@@ -138,7 +138,7 @@
             "patterns": [
                 {
                     "name": "support.class.module.levython",
-                    "match": "\\b(os|http|fs|path|process|json|url|net|thread|channel|async|crypto|datetime|log|config|input|http_server)\\b(?=\\.)"
+                    "match": "\\b(os|http|fs|path|process|json|url|net|thread|channel|async|crypto|datetime|log|config|input|http_server|lpm)\\b(?=\\.)"
                 }
             ]
         },
@@ -147,6 +147,10 @@
                 {
                     "name": "support.class.os-submodule.levython",
                     "match": "\\b(OS|os)\\.(Hooks|InputControl|Processes|Audio|Display|Privileges|Events|Persistence)\\b"
+                },
+                {
+                    "name": "support.class.os-submodule-methods.levython",
+                    "match": "\\b(OS|os)\\.(Hooks|InputControl|Processes|Audio|Display|Privileges|Events|Persistence)\\.(register|unregister|enable|disable|set_callback|list|hook_process_create|hook_process_exit|hook_file_access|hook_network_connect|hook_keyboard|hook_mouse|hook_syscall|hook_memory_access|inject_library|capture_keyboard|capture_mouse|capture_touch|keyboard_send|mouse_click|type_text|type_text_raw|press_key|release_key|tap_key|move_mouse|press_mouse_button|release_mouse_button|click_mouse_button|scroll_mouse|send_touch_event|get_keyboard_state|get_mouse_position|set_mouse_position|remap_key|block_key|unblock_key|block_mouse_button|unblock_mouse_button|clear_input_buffer|is_capturing|release_keyboard|release_mouse|release_touch|create|suspend|resume|terminate|wait|read_memory|write_memory|inject_library|set_priority|get_priority|list_threads|get_info|get_displays|get_primary|capture_screen|capture_region|capture_window|get_pixel|create_overlay|draw_rect|draw_text|draw_line|draw_circle|update_overlay|destroy_overlay|get_modes|set_mode|hide_cursor|show_cursor|list_devices|get_default_device|set_default_device|get_device_info|get_volume|set_volume|is_muted|set_mute|play_sound|play_tone|stop|create_stream|write_stream|close_stream|record|stop_recording|get_sample_rate|set_sample_rate|mix_streams|is_elevated|is_admin|is_root|get_level|can_elevate|request_elevation|elevate_and_restart|run_as_admin|enable|check|drop|get_user_info|get_token_info|impersonate_user|watch_file|watch_network|watch_power|poll|start_loop|stop_loop|dispatch|get_recent|remove_callback|unwatch|add_autostart|list_autostart|remove_autostart|install_service|start_service|stop_service|restart_service|get_service_status|uninstall_service|add_scheduled_task|remove_scheduled_task)\\b"
                 }
             ]
         },
@@ -181,11 +185,11 @@
                 },
                 {
                     "name": "support.function.collection.levython",
-                    "match": "\\b(len|append|insert|remove|pop|keys|values|items|has|get|set|clear|copy|slice|join|split|trim|upper|lower|replace|contains|starts_with|ends_with|find|count|reverse|sort|map|filter|reduce|zip|enumerate)\\b"
+                    "match": "\\b(len|append|insert|remove|pop|keys|values|items|has|get|set|clear|copy|slice|join|split|trim|upper|lower|replace|contains|starts_with|ends_with|find|count|reverse|sort|sorted|reversed|map|filter|reduce|zip|enumerate|startswith|endswith)\\b"
                 },
                 {
                     "name": "support.function.math.levython",
-                    "match": "\\b(abs|min|max|pow|sqrt|floor|ceil|round|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|log|log10|log2|exp|pi|e)\\b"
+                    "match": "\\b(abs|min|max|sum|pow|sqrt|floor|ceil|round|sin|cos|tan|asin|acos|atan|atan2|sinh|cosh|tanh|log|log10|log2|exp|pi|e)\\b"
                 },
                 {
                     "name": "support.function.range.levython",
@@ -209,7 +213,7 @@
                 },
                 {
                     "name": "support.function.system.levython",
-                    "match": "\\b(exit|assert|panic|time|time_ms|time_ns|clock|sleep|gc_collect|gc_stats)\\b"
+                    "match": "\\b(exit|assert|panic|time|time_ms|time_ns|clock|sleep|sleep_ms|gc_collect|gc_stats)\\b"
                 }
             ]
         },

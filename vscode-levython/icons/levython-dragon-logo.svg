@@ -1,0 +1,73 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Outer orange gradient -->
+    <linearGradient id="outerDragon" x1="10%" y1="0%" x2="90%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF8C42;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#FF7F32;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF6B22;stop-opacity:1" />
+    </linearGradient>
+    <!-- Inner red gradient -->
+    <linearGradient id="innerDragon" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" style="stop-color:#FF3333;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#EE0000;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#CC0000;stop-opacity:1" />
+    </linearGradient>
+    <!-- Accent gradient -->
+    <linearGradient id="accentDragon" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFA554;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FF8C42;stop-opacity:1" />
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer S-curve body (orange) -->
+  <path d="M16 4 C10 6, 9 11, 11 15 C13 19, 11 24, 8 27 C7 28, 6 30, 7 31" 
+        stroke="url(#outerDragon)" 
+        stroke-width="8" 
+        fill="none" 
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+  
+  <!-- Inner S-curve body (red) -->
+  <path d="M16 4.5 C11 6.5, 10.5 11, 12 15 C13.5 18.5, 12 23.5, 9 26.5" 
+        stroke="url(#innerDragon)" 
+        stroke-width="5" 
+        fill="none" 
+        stroke-linecap="round"/>
+  
+  <!-- Dragon head base -->
+  <ellipse cx="16" cy="6" rx="5" ry="4" fill="url(#outerDragon)"/>
+  <ellipse cx="16.5" cy="6.5" rx="3.5" ry="2.8" fill="url(#innerDragon)"/>
+  
+  <!-- Eye -->
+  <ellipse cx="17.5" cy="5.8" rx="1.2" ry="1.5" fill="white"/>
+  <circle cx="17.8" cy="6" r="0.6" fill="#333333"/>
+  
+  <!-- Top horn 1 -->
+  <path d="M14 4 L12.5 1.5 L13 4" fill="url(#innerDragon)"/>
+  <path d="M14 4 L12.5 1.5" stroke="url(#outerDragon)" stroke-width="1.2" stroke-linecap="round"/>
+  
+  <!-- Top horn 2 -->
+  <path d="M18 4 L19.5 0.8 L18.5 3.5" fill="url(#innerDragon)"/>
+  <path d="M18 3.8 L19.5 0.8" stroke="url(#outerDragon)" stroke-width="1.2" stroke-linecap="round"/>
+  
+  <!-- Small back spikes -->
+  <path d="M13 7 L11.5 6 L12.5 7.5" fill="#FF6B22" opacity="0.8"/>
+  <path d="M12 9 L10 8.5 L11.5 10" fill="#FF6B22" opacity="0.7"/>
+  
+  <!-- Nose/snout detail -->
+  <path d="M11 6.5 L9 7 L10 6" fill="url(#outerDragon)" opacity="0.9"/>
+  <path d="M10.5 7.5 L8.5 8.5 L9.5 7.5" fill="#FF8C42" opacity="0.8"/>
+  
+  <!-- Mid-body accent (orange highlight) -->
+  <path d="M13 15 C15 17, 14 20, 12 23" 
+        stroke="url(#accentDragon)" 
+        stroke-width="2" 
+        fill="none" 
+        opacity="0.6"
+        stroke-linecap="round"/>
+  
+  <!-- Tail flame effect -->
+  <circle cx="7" cy="30" r="1.8" fill="#FFA554" opacity="0.7"/>
+  <circle cx="8.5" cy="28.5" r="1.3" fill="#FF8C42" opacity="0.8"/>
+  <path d="M7 29 L5.5 30.5 L6.5 29" fill="#FFB366" opacity="0.6"/>
+</svg>
